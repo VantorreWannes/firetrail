@@ -1,7 +1,7 @@
 const std = @import("std");
 const luts = @import("luts.zig");
 const hashers = @import("hashers.zig");
-const white = @import("algorithms/white.zig");
+pub const white = @import("algorithms/white.zig");
 
 test {
     std.testing.refAllDecls(luts);

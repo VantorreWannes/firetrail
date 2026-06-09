@@ -2,6 +2,9 @@ const std = @import("std");
 const hashers = @import("../hashers.zig");
 const luts = @import("../luts.zig");
 
+pub const Encoder = WhiteEncoder(u64, u8, u16);
+pub const Decoder = WhiteDecoder(u64, u8, u16);
+
 pub fn WhiteEncoder(comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
     const Table = luts.LookupTable(Hash, Word);

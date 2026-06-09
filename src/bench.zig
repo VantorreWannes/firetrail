@@ -1,7 +1,7 @@
 const std = @import("std");
 const Io = std.Io;
 const zbench = @import("zbench");
-const skim = @import("firetrail");
+const firetrail = @import("firetrail");
 
 fn readFile(allocator: std.mem.Allocator, io: Io, path: []const u8) ![]u8 {
     var file = try std.Io.Dir.openFileAbsolute(io, path, .{});
@@ -12,7 +12,7 @@ fn readFile(allocator: std.mem.Allocator, io: Io, path: []const u8) ![]u8 {
     return try reader.interface.allocRemaining(allocator, .unlimited);
 }
 
-pub fn EncodeBenchmark(Encoder: type) type {
+pub fn EncoderBenchmark(Encoder: type) type {
     return struct {
         const Self = @This();
         ctx: *Encoder,
@@ -29,7 +29,7 @@ pub fn EncodeBenchmark(Encoder: type) type {
     };
 }
 
-pub fn DecodeBenchmark(Decoder: type) type {
+pub fn DecoderBenchmark(Decoder: type) type {
     return struct {
         const Self = @This();
         ctx: *Decoder,
@@ -67,19 +67,17 @@ pub fn main(init: std.process.Init) !void {
         const input_data = try readFile(arena, io, file_path);
 
         {
-            const Encoder = skim.Encoder;
+            const Encoder = firetrail.white.Encoder;
             const encoder = try arena.create(Encoder);
             encoder.* = try Encoder.init(arena);
 
             const output_data = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
-            const encode_name = try std.fmt.allocPrint(arena, "Encoder: {s}", .{std.fs.path.basename(file_path)});
+            const encoder_name = try std.fmt.allocPrint(arena, "White Encoder: {s}", .{std.fs.path.basename(file_path)});
+            const encoder_param = try arena.create(EncoderBenchmark(Encoder));
+            encoder_param.* = EncoderBenchmark(Encoder).init(encoder, input_data, output_data);
+            try bench.addParam(encoder_name, @as(*const EncoderBenchmark(Encoder), encoder_param), .{});
 
-            const encode_param = try arena.create(EncodeBenchmark(Encoder));
-            encode_param.* = EncodeBenchmark(Encoder).init(encoder, input_data, output_data);
-
-            try bench.addParam(encode_name, @as(*const EncodeBenchmark(Encoder), encode_param), .{});
-
-            const Decoder = skim.Decoder;
+            const Decoder = firetrail.white.Decoder;
             const decoder = try arena.create(Decoder);
             decoder.* = try Decoder.init(arena);
 
@@ -88,12 +86,12 @@ pub fn main(init: std.process.Init) !void {
             const compressed_data = compressed_buffer[0..compressed_size];
 
             const decompressed_data = try arena.alloc(u8, input_data.len);
-            const decode_name = try std.fmt.allocPrint(arena, "Decoder: {s}", .{std.fs.path.basename(file_path)});
+            const decoder_name = try std.fmt.allocPrint(arena, "White Decoder: {s}", .{std.fs.path.basename(file_path)});
 
-            const decode_param = try arena.create(DecodeBenchmark(Decoder));
-            decode_param.* = DecodeBenchmark(Decoder).init(decoder, compressed_data, decompressed_data);
+            const decode_param = try arena.create(DecoderBenchmark(Decoder));
+            decode_param.* = DecoderBenchmark(Decoder).init(decoder, compressed_data, decompressed_data);
 
-            try bench.addParam(decode_name, @as(*const DecodeBenchmark(Decoder), decode_param), .{});
+            try bench.addParam(decoder_name, @as(*const DecoderBenchmark(Decoder), decode_param), .{});
         }
     }
 
