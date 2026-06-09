@@ -1,6 +1,6 @@
 const std = @import("std");
 
-fn NumberHasher(comptime Data: type, comptime Hash: type) type {
+pub fn NumberHasher(comptime Data: type, comptime Hash: type) type {
     return struct {
         const Self = @This();
         const PRIME = switch (Data) {

@@ -1,6 +1,6 @@
 const std = @import("std");
 
-fn LookupTable(comptime Key: type, comptime Value: type) type {
+pub fn LookupTable(comptime Key: type, comptime Value: type) type {
     return struct {
         const Self = @This();
         const SIZE = 1 << @bitSizeOf(Key);
