@@ -16,13 +16,17 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
     const HASH_BYTES = @sizeOf(Hash);
     const SIZE_BYTES = @sizeOf(Size);
     const BATCH_BYTES = HEADER_BITS * WORD_BYTES;
+    const MIN_BYTES_LEFT: usize = HASH_BYTES + 1;
+    const MAX_MASKED_BYTES: usize = WORD_BYTES -| MIN_BYTES_LEFT;
 
     return struct {
         const Self = @This();
         table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .table = try Table.init(allocator) };
+            var table = try Table.init(allocator);
+            table.fill(0);
+            return .{ .table = table };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -32,6 +36,18 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
         pub inline fn outputBufferBound(len: usize) usize {
             const blocks = len / BATCH_BYTES;
             return len + (blocks * HEADER_BYTES) + HEADER_BYTES + WORD_BYTES + SIZE_BYTES;
+        }
+
+        inline fn findWordHash(self: *Self, word: Word) ?Hash {
+            inline for (0..MAX_MASKED_BYTES) |masked_bytes| {
+                const mask = ~@as(Word, 0) << @intCast(masked_bytes * 8);
+                const masked_word = word & mask;
+                const hash = Hasher.hash(masked_word);
+                defer self.table.set(hash, masked_word);
+
+                if (self.table.get(hash) == masked_word) return hash;
+            }
+            return null;
         }
 
         pub fn compressBlockToBuffer(self: *Self, noalias input: []const u8, noalias output: []u8) usize {
@@ -53,15 +69,13 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
                     const word = std.mem.readInt(Word, input[input_index..][0..WORD_BYTES], .little);
                     input_index += WORD_BYTES;
 
-                    const hash = Hasher.hash(word);
-                    if (word == self.table.get(hash)) {
+                    if (self.findWordHash(word)) |hash| {
                         std.mem.writeInt(Hash, output[output_index..][0..HASH_BYTES], hash, .little);
                         output_index += HASH_BYTES;
                         header |= 1 << token_index;
                     } else {
                         std.mem.writeInt(Word, output[output_index..][0..WORD_BYTES], word, .little);
                         output_index += WORD_BYTES;
-                        self.table.set(hash, word);
                     }
                 }
 
@@ -192,7 +206,9 @@ pub fn OrangeDecoder(comptime Word: type, comptime Header: type, comptime Hash: 
         table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .table = try Table.init(allocator) };
+            var table = try Table.init(allocator);
+            table.fill(0);
+            return .{ .table = table };
         }
 
         pub inline fn deinit(self: *Self, allocator: std.mem.Allocator) void {
