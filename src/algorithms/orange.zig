@@ -38,14 +38,21 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
             return len + (blocks * HEADER_BYTES) + HEADER_BYTES + WORD_BYTES + SIZE_BYTES;
         }
 
+        inline fn setWordEntries(self: *Self, word: Word) void {
+            inline for (0..MAX_MASKED_BYTES) |masked_bytes| {
+                const mask = ~@as(Word, 0) << @intCast(masked_bytes * 8);
+                const masked_word = word & mask;
+                const hash = Hasher.hash(masked_word);
+                self.table.set(hash, word);
+            }
+        }
+
         inline fn findWordHash(self: *Self, word: Word) ?Hash {
             inline for (0..MAX_MASKED_BYTES) |masked_bytes| {
                 const mask = ~@as(Word, 0) << @intCast(masked_bytes * 8);
                 const masked_word = word & mask;
                 const hash = Hasher.hash(masked_word);
-                defer self.table.set(hash, masked_word);
-
-                if (self.table.get(hash) == masked_word) return hash;
+                if (self.table.get(hash) == word) return hash;
             }
             return null;
         }
@@ -72,10 +79,12 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
                     if (self.findWordHash(word)) |hash| {
                         std.mem.writeInt(Hash, output[output_index..][0..HASH_BYTES], hash, .little);
                         output_index += HASH_BYTES;
-                        header |= 1 << token_index;
+                        header |= @as(Header, 1) << @intCast(token_index);
                     } else {
                         std.mem.writeInt(Word, output[output_index..][0..WORD_BYTES], word, .little);
                         output_index += WORD_BYTES;
+
+                        self.setWordEntries(word);
                     }
                 }
 
@@ -200,6 +209,8 @@ pub fn OrangeDecoder(comptime Word: type, comptime Header: type, comptime Hash: 
     const HASH_BYTES = @sizeOf(Hash);
     const SIZE_BYTES = @sizeOf(Size);
     const BATCH_BYTES = HEADER_BITS * WORD_BYTES;
+    const MIN_BYTES_LEFT: usize = HASH_BYTES + 1;
+    const MAX_MASKED_BYTES: usize = WORD_BYTES -| MIN_BYTES_LEFT;
 
     return struct {
         const Self = @This();
@@ -219,6 +230,15 @@ pub fn OrangeDecoder(comptime Word: type, comptime Header: type, comptime Hash: 
             return @intCast(std.mem.readInt(Size, input[0..SIZE_BYTES], .little));
         }
 
+        inline fn setWordEntries(self: *Self, word: Word) void {
+            inline for (0..MAX_MASKED_BYTES) |masked_bytes| {
+                const mask = ~@as(Word, 0) << @intCast(masked_bytes * 8);
+                const masked_word = word & mask;
+                const hash = Hasher.hash(masked_word);
+                self.table.set(hash, word);
+            }
+        }
+
         pub fn decompressBlockToBuffer(self: *Self, noalias input: []const u8, noalias output: []u8) usize {
             @setRuntimeSafety(false);
 
@@ -235,14 +255,15 @@ pub fn OrangeDecoder(comptime Word: type, comptime Header: type, comptime Hash: 
                 inline for (0..HEADER_BITS) |token_index| {
                     var word: Word = undefined;
 
-                    if ((header & (1 << token_index)) != 0) {
+                    if ((header & (@as(Header, 1) << @intCast(token_index))) != 0) {
                         const hash = std.mem.readInt(Hash, input[input_index..][0..HASH_BYTES], .little);
                         input_index += HASH_BYTES;
                         word = self.table.get(hash);
                     } else {
                         word = std.mem.readInt(Word, input[input_index..][0..WORD_BYTES], .little);
                         input_index += WORD_BYTES;
-                        self.table.set(Hasher.hash(word), word);
+
+                        self.setWordEntries(word);
                     }
 
                     std.mem.writeInt(Word, output[output_index..][0..WORD_BYTES], word, .little);

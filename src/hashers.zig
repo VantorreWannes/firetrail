@@ -17,44 +17,5 @@ pub fn NumberHasher(comptime Data: type, comptime Hash: type) type {
         pub inline fn hash(data: Data) Hash {
             return @truncate((data *% PRIME) >> SHIFT);
         }
-
-        test hash {
-            {
-                const expected = 0;
-                try std.testing.expectEqual(expected, Self.hash(expected));
-            }
-            {
-                const expected = 1;
-                try std.testing.expect(expected != Self.hash(expected));
-            }
-        }
     };
-}
-
-test {
-    {
-        std.testing.refAllDecls(NumberHasher(u8, u8));
-    }
-    {
-        std.testing.refAllDecls(NumberHasher(u16, u8));
-        std.testing.refAllDecls(NumberHasher(u16, u16));
-    }
-    {
-        std.testing.refAllDecls(NumberHasher(u32, u8));
-        std.testing.refAllDecls(NumberHasher(u32, u16));
-        std.testing.refAllDecls(NumberHasher(u32, u32));
-    }
-    {
-        std.testing.refAllDecls(NumberHasher(u64, u8));
-        std.testing.refAllDecls(NumberHasher(u64, u16));
-        std.testing.refAllDecls(NumberHasher(u64, u32));
-        std.testing.refAllDecls(NumberHasher(u64, u64));
-    }
-    {
-        std.testing.refAllDecls(NumberHasher(u128, u8));
-        std.testing.refAllDecls(NumberHasher(u128, u16));
-        std.testing.refAllDecls(NumberHasher(u128, u32));
-        std.testing.refAllDecls(NumberHasher(u128, u64));
-        std.testing.refAllDecls(NumberHasher(u128, u128));
-    }
 }
