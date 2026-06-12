@@ -94,22 +94,34 @@ pub fn main(init: std.process.Init) !void {
                     var encoder = try Encoder.init(arena);
                     defer encoder.deinit(arena);
 
-                    const input_buffer_size = 1024 * 8;
+                    const input_buffer_size = 1024 * 1024 * 128;
                     const output_buffer_size = Encoder.outputBufferBound(input_buffer_size);
 
-                    var input_buffer: [input_buffer_size]u8 = undefined;
-                    var output_buffer: [output_buffer_size]u8 = undefined;
+                    // Allocate buffers safely on the heap via arena instead of the stack
+                    const input_buffer = try arena.alloc(u8, input_buffer_size);
+                    const output_buffer = try arena.alloc(u8, output_buffer_size);
 
-                    var input_bytes_read = try input_file.readPositionalAll(io, &input_buffer, input_file_index);
+                    const input_reader_buffer_size = 1024 * 1024 * 128;
+                    const output_writer_buffer_size = 1024 * 1024 * 128;
+
+                    const input_reader_buffer = try arena.alloc(u8, input_reader_buffer_size);
+                    var input_reader = input_file.reader(io, input_reader_buffer);
+
+                    const output_writer_buffer = try arena.alloc(u8, output_writer_buffer_size);
+                    var output_writer = output_file.writer(io, output_writer_buffer);
+
+                    var input_bytes_read = try input_reader.interface.readSliceShort(input_buffer);
                     input_file_index += input_bytes_read;
                     while (input_bytes_read > 0) {
-                        const output_bytes_written = encoder.compressBlockToBuffer(input_buffer[0..input_bytes_read], &output_buffer);
-                        try output_file.writePositionalAll(io, output_buffer[0..output_bytes_written], output_file_index);
+                        const output_bytes_written = encoder.compressBlockToBuffer(input_buffer[0..input_bytes_read], output_buffer);
+                        try output_writer.interface.writeAll(output_buffer[0..output_bytes_written]);
                         output_file_index += output_bytes_written;
 
-                        input_bytes_read = try input_file.readPositionalAll(io, &input_buffer, input_file_index);
+                        input_bytes_read = try input_reader.interface.readSliceShort(input_buffer);
                         input_file_index += input_bytes_read;
                     }
+
+                    try output_writer.interface.flush();
                 },
             }
         },
@@ -128,23 +140,34 @@ pub fn main(init: std.process.Init) !void {
                     var decoder = try Decoder.init(arena);
                     defer decoder.deinit(arena);
 
-                    const max_uncompressed_size = 1024 * 8;
-                    const max_compressed_size = Encoder.outputBufferBound(max_uncompressed_size);
+                    const output_buffer_size = 1024 * 1024 * 128;
+                    const input_buffer_size = Encoder.outputBufferBound(output_buffer_size);
 
-                    var input_buffer: [max_compressed_size]u8 = undefined;
-                    var output_buffer: [max_uncompressed_size]u8 = undefined;
+                    const input_buffer = try arena.alloc(u8, input_buffer_size);
+                    const output_buffer = try arena.alloc(u8, output_buffer_size);
 
-                    var input_bytes_read = try input_file.readPositionalAll(io, &input_buffer, input_file_index);
+                    const input_reader_buffer_size = 1024 * 1024 * 128;
+                    const output_writer_buffer_size = 1024 * 1024 * 128;
+
+                    const input_reader_buffer = try arena.alloc(u8, input_reader_buffer_size);
+                    var input_reader = input_file.reader(io, input_reader_buffer);
+
+                    const output_writer_buffer = try arena.alloc(u8, output_writer_buffer_size);
+                    var output_writer = output_file.writer(io, output_writer_buffer);
+
+                    var input_bytes_read = try input_reader.interface.readSliceShort(input_buffer);
+                    input_file_index += input_bytes_read;
                     while (input_bytes_read > 0) {
-                        const output_buffer_size = Decoder.exactOutputLength(input_buffer[0..input_bytes_read]);
-                        const compressed_bytes_consumed = decoder.decompressBlockToBuffer(input_buffer[0..input_bytes_read], output_buffer[0..output_buffer_size]);
+                        const output_bytes_written = Decoder.exactOutputLength(input_buffer[0..input_bytes_read]);
+                        _ = decoder.decompressBlockToBuffer(input_buffer[0..input_bytes_read], output_buffer[0..output_bytes_written]);
+                        try output_writer.interface.writeAll(output_buffer[0..output_bytes_written]);
+                        output_file_index += output_bytes_written;
 
-                        try output_file.writePositionalAll(io, output_buffer[0..output_buffer_size], output_file_index);
-                        output_file_index += output_buffer_size;
-
-                        input_file_index += compressed_bytes_consumed;
-                        input_bytes_read = try input_file.readPositionalAll(io, &input_buffer, input_file_index);
+                        input_bytes_read = try input_reader.interface.readSliceShort(input_buffer);
+                        input_file_index += input_bytes_read;
                     }
+
+                    try output_writer.interface.flush();
                 },
             }
         },
