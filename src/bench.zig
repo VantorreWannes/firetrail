@@ -93,6 +93,34 @@ pub fn main(init: std.process.Init) !void {
 
             try bench.addParam(decoder_name, @as(*const DecoderBenchmark(Decoder), decode_param), .{});
         }
+
+        {
+            const Encoder = firetrail.orange.Encoder;
+            const encoder = try arena.create(Encoder);
+            encoder.* = try Encoder.init(arena);
+
+            const output_data = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
+            const encoder_name = try std.fmt.allocPrint(arena, "Orange Encoder: {s}", .{std.fs.path.basename(file_path)});
+            const encoder_param = try arena.create(EncoderBenchmark(Encoder));
+            encoder_param.* = EncoderBenchmark(Encoder).init(encoder, input_data, output_data);
+            try bench.addParam(encoder_name, @as(*const EncoderBenchmark(Encoder), encoder_param), .{});
+
+            const Decoder = firetrail.white.Decoder;
+            const decoder = try arena.create(Decoder);
+            decoder.* = try Decoder.init(arena);
+
+            const compressed_buffer = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
+            const compressed_size = encoder.compressBlockToBuffer(input_data, compressed_buffer);
+            const compressed_data = compressed_buffer[0..compressed_size];
+
+            const decompressed_data = try arena.alloc(u8, input_data.len);
+            const decoder_name = try std.fmt.allocPrint(arena, "Orange Decoder: {s}", .{std.fs.path.basename(file_path)});
+
+            const decode_param = try arena.create(DecoderBenchmark(Decoder));
+            decode_param.* = DecoderBenchmark(Decoder).init(decoder, compressed_data, decompressed_data);
+
+            try bench.addParam(decoder_name, @as(*const DecoderBenchmark(Decoder), decode_param), .{});
+        }
     }
 
     try writer.writeAll("\n");
