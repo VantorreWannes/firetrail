@@ -19,3 +19,8 @@ pub fn NumberHasher(comptime Data: type, comptime Hash: type) type {
         }
     };
 }
+
+test "hash" {
+    const Hasher = NumberHasher(u64, u16);
+    try std.testing.expectEqual(40503, Hasher.hash(1));
+}
