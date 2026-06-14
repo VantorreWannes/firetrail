@@ -7,6 +7,8 @@ pub fn LookupTable(comptime Key: type, comptime Value: type) type {
 
         table: []Value,
 
+        pub const empty = &[_]Value{};
+
         pub inline fn init(allocator: std.mem.Allocator) !Self {
             const table = try allocator.alloc(Value, SIZE);
             return Self{ .table = table };
