@@ -97,7 +97,6 @@ pub fn main(init: std.process.Init) !void {
                     const input_buffer_size = 1024 * 1024 * 128;
                     const output_buffer_size = Encoder.outputBufferBound(input_buffer_size);
 
-                    // Allocate buffers safely on the heap via arena instead of the stack
                     const input_buffer = try arena.alloc(u8, input_buffer_size);
                     const output_buffer = try arena.alloc(u8, output_buffer_size);
 

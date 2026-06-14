@@ -7,12 +7,12 @@ pub fn LookupTable(comptime Key: type, comptime Value: type) type {
 
         table: []Value,
 
-        pub fn init(allocator: std.mem.Allocator) !Self {
+        pub inline fn init(allocator: std.mem.Allocator) !Self {
             const table = try allocator.alloc(Value, SIZE);
             return Self{ .table = table };
         }
 
-        pub fn fill(self: *Self, value: Value) void {
+        pub inline fn fill(self: *Self, value: Value) void {
             @memset(self.table, value);
         }
 
@@ -28,4 +28,45 @@ pub fn LookupTable(comptime Key: type, comptime Value: type) type {
             self.table[key] = value;
         }
     };
+}
+
+test "init + deinit" {
+    const allocator = std.testing.allocator;
+    const Lut = LookupTable(u16, u32);
+
+    var lut = try Lut.init(allocator);
+    defer lut.deinit(allocator);
+}
+
+test "set" {
+    const allocator = std.testing.allocator;
+    const Lut = LookupTable(u8, u8);
+
+    var lut = try Lut.init(allocator);
+    defer lut.deinit(allocator);
+
+    lut.set(0, 0);
+    try std.testing.expectEqual(0, lut.get(0));
+}
+
+test "get" {
+    const allocator = std.testing.allocator;
+    const Lut = LookupTable(u8, u8);
+
+    var lut = try Lut.init(allocator);
+    defer lut.deinit(allocator);
+
+    lut.set(0, 0);
+    try std.testing.expectEqual(0, lut.get(0));
+}
+
+test "fill" {
+    const allocator = std.testing.allocator;
+    const Lut = LookupTable(u8, u8);
+
+    var lut = try Lut.init(allocator);
+    defer lut.deinit(allocator);
+
+    lut.fill(0);
+    try std.testing.expectEqual(0, lut.get(1));
 }
