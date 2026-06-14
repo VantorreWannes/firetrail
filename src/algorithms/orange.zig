@@ -11,21 +11,14 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
 
     const HEADER_BITS = @bitSizeOf(Header);
     const HEADER_BYTES = @sizeOf(Header);
-
     const WORD_BYTES = @sizeOf(Word);
-
     const HASH_BYTES = @sizeOf(Hash);
-
     const SIZE_BYTES = @sizeOf(Size);
-
     const MASK_BYTES = @sizeOf(Mask);
 
     const BATCH_BYTES: usize = HEADER_BITS * WORD_BYTES;
-
     const MIN_GAINED_BYTES: usize = 1;
-
     const MAX_MASKED_BYTES: usize = MASK_BYTES -| (HASH_BYTES + MIN_GAINED_BYTES);
-
     const MAX_WORD_VARIATIONS: usize = MAX_MASKED_BYTES + 1;
 
     const Hasher = hashers.NumberHasher(Word, Hash);
@@ -36,13 +29,13 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
         tables: [MAX_WORD_VARIATIONS]Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            var tables = [_]Table{.{ .table = Table.empty }} ** MAX_WORD_VARIATIONS;
+            var tables: [MAX_WORD_VARIATIONS]Table = undefined;
+            var initialized: usize = 0;
+            errdefer for (tables[0..initialized]) |*table| table.deinit(allocator);
 
-            errdefer for (&tables) |*table| table.deinit(allocator);
-
-            for (&tables) |*table| {
-                table.* = try Table.init(allocator);
-                table.fill(0);
+            while (initialized < MAX_WORD_VARIATIONS) : (initialized += 1) {
+                tables[initialized] = try Table.init(allocator);
+                tables[initialized].fill(0);
             }
 
             return Self{ .tables = tables };
@@ -101,17 +94,26 @@ pub fn OrangeEncoder(comptime Word: type, comptime Header: type, comptime Hash: 
                         const hash = Hasher.hash(masked_word);
 
                         if (self.tables[masked_word_index].get(hash) == masked_word) {
-                            std.mem.writeInt(Hash, output[output_index..][0..HASH_BYTES], hash, .little);
-                            output_index += HASH_BYTES;
+                            var has_collision = false;
+                            inline for (0..masked_word_index) |prior_idx| {
+                                if (self.tables[prior_idx].get(hash) != 0) {
+                                    has_collision = true;
+                                }
+                            }
 
-                            std.mem.writeInt(Word, output[output_index..][0..WORD_BYTES], word, .little);
-                            output_index += masked_word_index;
+                            if (!has_collision) {
+                                std.mem.writeInt(Hash, output[output_index..][0..HASH_BYTES], hash, .little);
+                                output_index += HASH_BYTES;
 
-                            header |= 1 << token_index;
+                                @memcpy(output[output_index..][0..masked_word_index], std.mem.asBytes(&word)[0..masked_word_index]);
+                                output_index += masked_word_index;
 
-                            self.updateTables(masked_word_index, masked_words);
+                                header |= @as(Header, 1) << @intCast(token_index);
 
-                            break;
+                                self.updateTables(masked_word_index, masked_words);
+
+                                break;
+                            }
                         }
                     } else {
                         std.mem.writeInt(Word, output[output_index..][0..WORD_BYTES], word, .little);
@@ -141,21 +143,14 @@ pub fn OrangeDecoder(comptime Word: type, comptime Header: type, comptime Hash: 
 
     const HEADER_BITS = @bitSizeOf(Header);
     const HEADER_BYTES = @sizeOf(Header);
-
     const WORD_BYTES = @sizeOf(Word);
-
     const HASH_BYTES = @sizeOf(Hash);
-
     const SIZE_BYTES = @sizeOf(Size);
-
     const MASK_BYTES = @sizeOf(Mask);
 
     const BATCH_BYTES: usize = HEADER_BITS * WORD_BYTES;
-
     const MIN_GAINED_BYTES: usize = 1;
-
     const MAX_MASKED_BYTES: usize = MASK_BYTES -| (HASH_BYTES + MIN_GAINED_BYTES);
-
     const MAX_WORD_VARIATIONS: usize = MAX_MASKED_BYTES + 1;
 
     const Hasher = hashers.NumberHasher(Word, Hash);
@@ -166,13 +161,13 @@ pub fn OrangeDecoder(comptime Word: type, comptime Header: type, comptime Hash: 
         tables: [MAX_WORD_VARIATIONS]Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            var tables = [_]Table{.{ .table = Table.empty }} ** MAX_WORD_VARIATIONS;
+            var tables: [MAX_WORD_VARIATIONS]Table = undefined;
+            var initialized: usize = 0;
+            errdefer for (tables[0..initialized]) |*table| table.deinit(allocator);
 
-            errdefer for (&tables) |*table| table.deinit(allocator);
-
-            for (&tables) |*table| {
-                table.* = try Table.init(allocator);
-                table.fill(0);
+            while (initialized < MAX_WORD_VARIATIONS) : (initialized += 1) {
+                tables[initialized] = try Table.init(allocator);
+                tables[initialized].fill(0);
             }
 
             return Self{ .tables = tables };
@@ -211,7 +206,7 @@ pub fn OrangeDecoder(comptime Word: type, comptime Header: type, comptime Hash: 
         inline fn decodeMatch(self: *Self, hash: Hash, input: []const u8, input_index: *usize) Word {
             inline for (0..MAX_WORD_VARIATIONS) |masked_word_index| {
                 const masked_word = self.tables[masked_word_index].get(hash);
-                if (Hasher.hash(masked_word) == hash) {
+                if (masked_word != 0 and Hasher.hash(masked_word) == hash) {
                     var literal: Word = 0;
                     @memcpy(std.mem.asBytes(&literal)[0..masked_word_index], input[input_index.*..][0..masked_word_index]);
                     input_index.* += masked_word_index;
