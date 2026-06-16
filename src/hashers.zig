@@ -5,6 +5,7 @@ pub fn NumberHasher(comptime Data: type, comptime Hash: type) type {
     return struct {
         const Self = @This();
         const PRIME = switch (Data) {
+            u256 => 0x9E3779B97F4A7C15F390D159039E962B1D39343900132BE2400C547849D9CD77,
             u128 => 0x9E3779B97F4A7C15F39CC0605CEDC7FD,
             u64 => 0x9E3779B97F4A7C15,
             u32 => 0x9D6EF916,

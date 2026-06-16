@@ -7,7 +7,7 @@ pub const Decoder = WhiteDecoder(u64, u8, u16);
 
 pub fn WhiteEncoder(comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-    const Table = luts.LookupTable(Hash, Word);
+    const Table = luts.ArrayLookupTable(Hash, Word);
     const Size = u64;
 
     const HEADER_BITS = @bitSizeOf(Header);
@@ -78,12 +78,16 @@ pub fn WhiteEncoder(comptime Word: type, comptime Header: type, comptime Hash: t
 
             return output_index;
         }
+        
+        pub fn reset(self: *Self) void {
+            self.table.fill(0);
+        }
     };
 }
 
 pub fn WhiteDecoder(comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-    const Table = luts.LookupTable(Hash, Word);
+    const Table = luts.ArrayLookupTable(Hash, Word);
     const Size = u64;
 
     const HEADER_BITS = @bitSizeOf(Header);
@@ -149,6 +153,10 @@ pub fn WhiteDecoder(comptime Word: type, comptime Header: type, comptime Hash: t
             }
 
             return input_index;
+        }
+
+        pub fn reset(self: *Self) void {
+            self.table.fill(0);
         }
     };
 }

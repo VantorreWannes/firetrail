@@ -1,5 +1,5 @@
 const std = @import("std");
-const firetrail = @import("firetrail");
+const firetrail = @import("root.zig");
 
 const Mode = enum {
     decode,

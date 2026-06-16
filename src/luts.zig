@@ -4,6 +4,8 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type) type {
     return struct {
         const Self = @This();
         const SIZE = 1 << @bitSizeOf(Key);
+        pub const K = Key;
+        pub const V = Value;
 
         table: []Value,
 
@@ -75,7 +77,7 @@ test "fill" {
 
 pub fn StructLookupTable(comptime lookup_table_types: []const type) type {
     comptime var field_names: [lookup_table_types.len][]const u8 = undefined;
-    inline for (&field_names, 0..) |*field_name, index| field_name.* = std.fmt.comptimePrint("{d}", .{index});
+    inline for (&field_names, 0..) |*field_name, index| field_name.* = std.mem.asBytes(&index);
 
     comptime var field_types: [lookup_table_types.len]type = undefined;
     inline for (&field_types, lookup_table_types) |*field_type, lookup_table_type| field_type.* = lookup_table_type;
@@ -100,12 +102,12 @@ pub fn StructLookupTable(comptime lookup_table_types: []const type) type {
         pub const empty = Self{ .container = undefined };
 
         pub fn get(self: *Self, comptime index: usize) *lookup_table_types[index] {
-            const name = std.fmt.comptimePrint("{d}", .{index});
+            const name = comptime std.mem.asBytes(&index);
             return &@field(self.container, name);
         }
 
         pub fn set(self: *Self, comptime index: usize, value: lookup_table_types[index]) void {
-            const name = std.fmt.comptimePrint("{d}", .{index});
+            const name = comptime std.mem.asBytes(&index);
             @field(self.container, name) = value;
         }
     };
