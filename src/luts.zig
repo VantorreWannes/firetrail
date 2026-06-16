@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub fn LookupTable(comptime Key: type, comptime Value: type) type {
+pub fn ArrayLookupTable(comptime Key: type, comptime Value: type) type {
     return struct {
         const Self = @This();
         const SIZE = 1 << @bitSizeOf(Key);
@@ -34,7 +34,7 @@ pub fn LookupTable(comptime Key: type, comptime Value: type) type {
 
 test "init + deinit" {
     const allocator = std.testing.allocator;
-    const Lut = LookupTable(u16, u32);
+    const Lut = ArrayLookupTable(u16, u32);
 
     var lut = try Lut.init(allocator);
     defer lut.deinit(allocator);
@@ -42,7 +42,7 @@ test "init + deinit" {
 
 test "set" {
     const allocator = std.testing.allocator;
-    const Lut = LookupTable(u8, u8);
+    const Lut = ArrayLookupTable(u8, u8);
 
     var lut = try Lut.init(allocator);
     defer lut.deinit(allocator);
@@ -53,7 +53,7 @@ test "set" {
 
 test "get" {
     const allocator = std.testing.allocator;
-    const Lut = LookupTable(u8, u8);
+    const Lut = ArrayLookupTable(u8, u8);
 
     var lut = try Lut.init(allocator);
     defer lut.deinit(allocator);
@@ -64,11 +64,49 @@ test "get" {
 
 test "fill" {
     const allocator = std.testing.allocator;
-    const Lut = LookupTable(u8, u8);
+    const Lut = ArrayLookupTable(u8, u8);
 
     var lut = try Lut.init(allocator);
     defer lut.deinit(allocator);
 
     lut.fill(0);
     try std.testing.expectEqual(0, lut.get(1));
+}
+
+pub fn StructLookupTable(comptime lookup_table_types: []const type) type {
+    comptime var field_names: [lookup_table_types.len][]const u8 = undefined;
+    inline for (&field_names, 0..) |*field_name, index| field_name.* = std.fmt.comptimePrint("{d}", .{index});
+
+    comptime var field_types: [lookup_table_types.len]type = undefined;
+    inline for (&field_types, lookup_table_types) |*field_type, lookup_table_type| field_type.* = lookup_table_type;
+
+    comptime var field_attributes: [lookup_table_types.len]std.builtin.Type.StructField.Attributes = undefined;
+    inline for (&field_attributes) |*field_attribute| field_attribute.* = std.builtin.Type.StructField.Attributes{};
+
+    const Container = @Struct(
+        .auto,
+        null,
+        &field_names,
+        &field_types,
+        &field_attributes,
+    );
+
+    return struct {
+        const Self = @This();
+        container: Container,
+
+        pub const SIZE = lookup_table_types.len;
+
+        pub const empty = Self{ .container = undefined };
+
+        pub fn get(self: *Self, comptime index: usize) *lookup_table_types[index] {
+            const name = std.fmt.comptimePrint("{d}", .{index});
+            return &@field(self.container, name);
+        }
+
+        pub fn set(self: *Self, comptime index: usize, value: lookup_table_types[index]) void {
+            const name = std.fmt.comptimePrint("{d}", .{index});
+            @field(self.container, name) = value;
+        }
+    };
 }
