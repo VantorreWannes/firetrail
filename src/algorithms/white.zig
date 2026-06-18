@@ -7,7 +7,7 @@ pub const Decoder = WhiteDecoder(u64, u64, u8, u16);
 
 pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-    const Table = luts.ArrayLookupTable(Hash, Word);
+    const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(u16) + 1);
 
     return struct {
         const Self = @This();
@@ -86,7 +86,7 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
 
 pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-    const Table = luts.ArrayLookupTable(Hash, Word);
+    const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(u16) + 1);
 
     return struct {
         const Self = @This();

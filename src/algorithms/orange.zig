@@ -7,7 +7,7 @@ pub const Decoder = OrangeDecoder(u64, u64, u8, u16);
 
 pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-    const Table = luts.ArrayLookupTable(Hash, Word);
+    const Table = luts.FreqLookupTable(Hash, Word, u16);
 
     return struct {
         const Self = @This();
@@ -86,7 +86,7 @@ pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: 
 
 pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-    const Table = luts.ArrayLookupTable(Hash, Word);
+    const Table = luts.FreqLookupTable(Hash, Word, u16);
 
     return struct {
         const Self = @This();
