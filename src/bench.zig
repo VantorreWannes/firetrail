@@ -105,7 +105,7 @@ pub fn main(init: std.process.Init) !void {
             encoder_param.* = EncoderBenchmark(Encoder).init(encoder, input_data, output_data);
             try bench.addParam(encoder_name, @as(*const EncoderBenchmark(Encoder), encoder_param), .{});
 
-            const Decoder = firetrail.white.Decoder;
+            const Decoder = firetrail.orange.Decoder;
             const decoder = try arena.create(Decoder);
             decoder.* = try Decoder.init(arena);
 

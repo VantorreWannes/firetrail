@@ -1,117 +1,72 @@
 const std = @import("std");
-
 const hashers = @import("../hashers.zig");
 const luts = @import("../luts.zig");
 
-pub const Encoder = OrangeEncoder(u32, u16);
-pub const Decoder = OrangeDecoder(u32, u16);
+pub const Encoder = OrangeEncoder(u64, u64, u8, u16);
+pub const Decoder = OrangeDecoder(u64, u64, u8, u16);
 
-fn TablesTypes(comptime Word: type, comptime Hash: type) [@sizeOf(Word) - @sizeOf(Hash)]type {
-    const WORD_BYTES = @sizeOf(Word);
-    const HASH_BYTES = @sizeOf(Hash);
-    const TABLES_COUNT = WORD_BYTES - HASH_BYTES;
-
-    var types: [TABLES_COUNT]type = undefined;
-    inline for (&types, 0..) |*t, i| {
-        const size = WORD_BYTES - i;
-        t.* = luts.ArrayLookupTable(Hash, std.meta.Int(.unsigned, size * 8));
-    }
-    return types;
-}
-
-pub fn OrangeEncoder(comptime Word: type, comptime Hash: type) type {
-    const Size = u64;
-
-    const WORD_BYTES = @sizeOf(Word);
-    const HASH_BYTES = @sizeOf(Hash);
-    const SIZE_BYTES = @sizeOf(Size);
-
-    const table_types = comptime TablesTypes(Word, Hash);
-    const Tables = luts.StructLookupTable(&table_types);
+pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-
-    const TABLES_COUNT = table_types.len;
-    const LITERAL_STATE = TABLES_COUNT;
-    const BATCH_SIZE = 8;
-
-    const LayerBits = std.math.log2_int_ceil(usize, TABLES_COUNT + 1);
-
-    const HEADER_BITS = BATCH_SIZE * LayerBits;
-    const Header = std.meta.Int(.unsigned, HEADER_BITS);
-    const HEADER_BYTES = HEADER_BITS / 8;
-
-    const BATCH_BYTES: usize = BATCH_SIZE * WORD_BYTES;
+    const Table = luts.ArrayLookupTable(Hash, Word);
 
     return struct {
         const Self = @This();
-        tables: Tables,
+
+        const header_bits = @bitSizeOf(Header);
+        const word_bytes = @sizeOf(Word);
+        const header_bytes = @sizeOf(Header);
+        const hash_bytes = @sizeOf(Hash);
+        const size_bytes = @sizeOf(Size);
+        const batch_bytes = header_bits * word_bytes;
+
+        table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            @setEvalBranchQuota(10000);
-            var tables = Tables.empty;
-            errdefer inline for (0..Tables.SIZE) |index| tables.get(index).deinit(allocator);
-            inline for (table_types, 0..) |Table, index| tables.set(index, try Table.init(allocator));
-            return Self{ .tables = tables };
+            return .{ .table = try Table.init(allocator) };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            inline for (0..Tables.SIZE) |index| self.tables.get(index).deinit(allocator);
+            self.table.deinit(allocator);
+            self.* = undefined;
         }
 
-        pub inline fn outputBufferBound(len: usize) usize {
-            const blocks = len / BATCH_BYTES;
-            return len + (blocks * HEADER_BYTES) + HEADER_BYTES + WORD_BYTES + SIZE_BYTES;
+        pub fn outputBufferBound(len: usize) usize {
+            const blocks = len / batch_bytes;
+            return len + (blocks * header_bytes) + header_bytes + word_bytes + size_bytes;
         }
 
         pub fn compressBlockToBuffer(self: *Self, noalias input: []const u8, noalias output: []u8) usize {
             @setRuntimeSafety(false);
-            @setEvalBranchQuota(100000);
 
             var input_index: usize = 0;
             var output_index: usize = 0;
-            const loop_limit = (input.len / BATCH_BYTES) * BATCH_BYTES;
+            const loop_limit = (input.len / batch_bytes) * batch_bytes;
 
-            std.mem.writeInt(Size, output[0..SIZE_BYTES], @intCast(input.len), .little);
-            output_index += SIZE_BYTES;
+            std.mem.writeInt(Size, output[0..size_bytes], @intCast(input.len), .little);
+            output_index += size_bytes;
 
             while (input_index < loop_limit) {
                 const header_pos = output_index;
-                output_index += HEADER_BYTES;
+                output_index += header_bytes;
                 var header: Header = 0;
 
-                inline for (0..BATCH_SIZE) |token_index| {
-                    const word = std.mem.readInt(Word, input[input_index..][0..WORD_BYTES], .little);
-                    input_index += WORD_BYTES;
+                inline for (0..header_bits) |token_index| {
+                    const word = std.mem.readInt(Word, input[input_index..][0..word_bytes], .little);
+                    input_index += word_bytes;
 
-                    inline for (0..Tables.SIZE) |index| {
-                        const table = self.tables.get(index);
-                        const Table = @TypeOf(table.*);
-                        const MaskedWord = Table.V;
-                        const masked_word: MaskedWord = @truncate(word);
-                        const hash = Hasher.hash(masked_word);
-                        defer table.set(hash, masked_word);
-
-                        if (masked_word == table.get(hash)) {
-                            std.mem.writeInt(Hash, output[output_index..][0..HASH_BYTES], hash, .little);
-                            output_index += HASH_BYTES;
-
-                            const masked_word_bytes = @bitSizeOf(MaskedWord) / 8;
-                            const remaining_bytes = WORD_BYTES - masked_word_bytes;
-                            const word_bytes = std.mem.asBytes(&word);
-                            @memcpy(output[output_index..][0..remaining_bytes], word_bytes[masked_word_bytes..WORD_BYTES]);
-                            output_index += remaining_bytes;
-
-                            header |= index << token_index * LayerBits;
-                            break;
-                        }
+                    const hash = Hasher.hash(word);
+                    if (word == self.table.get(hash)) {
+                        std.mem.writeInt(Hash, output[output_index..][0..hash_bytes], hash, .little);
+                        output_index += hash_bytes;
+                        header |= 1 << token_index;
                     } else {
-                        std.mem.writeInt(Word, output[output_index..][0..WORD_BYTES], word, .little);
-                        output_index += WORD_BYTES;
-                        header |= @as(Header, LITERAL_STATE) << @intCast(token_index * LayerBits);
+                        std.mem.writeInt(Word, output[output_index..][0..word_bytes], word, .little);
+                        output_index += word_bytes;
+                        self.table.set(hash, word);
                     }
                 }
 
-                std.mem.writeInt(Header, output[header_pos..][0..HEADER_BYTES], header, .little);
+                std.mem.writeInt(Header, output[header_pos..][0..header_bytes], header, .little);
             }
 
             const remaining = input.len - input_index;
@@ -124,122 +79,67 @@ pub fn OrangeEncoder(comptime Word: type, comptime Hash: type) type {
         }
 
         pub fn reset(self: *Self) void {
-            inline for (0..Tables.SIZE) |index| self.tables.get(index).fill(0);
+            self.table.fill(0);
         }
     };
 }
 
-pub fn OrangeDecoder(comptime Word: type, comptime Hash: type) type {
-    const Size = u64;
-
-    const WORD_BYTES = @sizeOf(Word);
-    const HASH_BYTES = @sizeOf(Hash);
-    const SIZE_BYTES = @sizeOf(Size);
-
-    const table_types = comptime TablesTypes(Word, Hash);
-    const Tables = luts.StructLookupTable(&table_types);
+pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash);
-
-    const TABLES_COUNT = table_types.len;
-    const LITERAL_STATE = TABLES_COUNT;
-    const BATCH_SIZE = 8;
-
-    const LayerBits = std.math.log2_int_ceil(usize, TABLES_COUNT + 1);
-    const Layer = std.meta.Int(.unsigned, LayerBits);
-
-    const HEADER_BITS = BATCH_SIZE * LayerBits;
-    const Header = std.meta.Int(.unsigned, HEADER_BITS);
-    const HEADER_BYTES = HEADER_BITS / 8;
-
-    const BATCH_BYTES: usize = BATCH_SIZE * WORD_BYTES;
+    const Table = luts.ArrayLookupTable(Hash, Word);
 
     return struct {
         const Self = @This();
-        tables: Tables,
+
+        const header_bits = @bitSizeOf(Header);
+        const word_bytes = @sizeOf(Word);
+        const header_bytes = @sizeOf(Header);
+        const hash_bytes = @sizeOf(Hash);
+        const size_bytes = @sizeOf(Size);
+        const batch_bytes = header_bits * word_bytes;
+
+        table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            @setEvalBranchQuota(10000);
-            var tables = Tables.empty;
-            errdefer inline for (0..Tables.SIZE) |index| tables.get(index).deinit(allocator);
-            inline for (table_types, 0..) |Table, index| tables.set(index, try Table.init(allocator));
-            return Self{ .tables = tables };
+            return .{ .table = try Table.init(allocator) };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            inline for (0..Tables.SIZE) |index| self.tables.get(index).deinit(allocator);
+            self.table.deinit(allocator);
+            self.* = undefined;
         }
 
-        pub inline fn exactOutputLength(input: []const u8) usize {
-            return @intCast(std.mem.readInt(Size, input[0..SIZE_BYTES], .little));
-        }
-
-        pub inline fn outputBufferBound(len: usize) usize {
-            const blocks = len / BATCH_BYTES;
-            return len + (blocks * HEADER_BYTES) + HEADER_BYTES + WORD_BYTES + SIZE_BYTES;
+        pub fn exactOutputLength(input: []const u8) usize {
+            return @intCast(std.mem.readInt(Size, input[0..size_bytes], .little));
         }
 
         pub fn decompressBlockToBuffer(self: *Self, noalias input: []const u8, noalias output: []u8) usize {
             @setRuntimeSafety(false);
-            @setEvalBranchQuota(100000);
 
             const len = exactOutputLength(input);
-            const loop_limit = (len / BATCH_BYTES) * BATCH_BYTES;
+            const loop_limit = (len / batch_bytes) * batch_bytes;
 
-            var input_index: usize = SIZE_BYTES;
+            var input_index: usize = size_bytes;
             var output_index: usize = 0;
 
             while (output_index < loop_limit) {
-                const header = std.mem.readInt(Header, input[input_index..][0..HEADER_BYTES], .little);
-                input_index += HEADER_BYTES;
+                const header = std.mem.readInt(Header, input[input_index..][0..header_bytes], .little);
+                input_index += header_bytes;
 
-                inline for (0..BATCH_SIZE) |token_index| {
-                    var word: Word = 0;
-                    const layer_val: Layer = @truncate(header >> @intCast(token_index * LayerBits));
+                inline for (0..header_bits) |token_index| {
+                    const word: Word = if ((header & (1 << token_index)) != 0) blk: {
+                        const hash = std.mem.readInt(Hash, input[input_index..][0..hash_bytes], .little);
+                        input_index += hash_bytes;
+                        break :blk self.table.get(hash);
+                    } else blk: {
+                        const word = std.mem.readInt(Word, input[input_index..][0..word_bytes], .little);
+                        input_index += word_bytes;
+                        self.table.set(Hasher.hash(word), word);
+                        break :blk word;
+                    };
 
-                    if (layer_val == LITERAL_STATE) {
-                        word = std.mem.readInt(Word, input[input_index..][0..WORD_BYTES], .little);
-                        input_index += WORD_BYTES;
-
-                        inline for (0..Tables.SIZE) |index| {
-                            const table = self.tables.get(index);
-                            const Table = @TypeOf(table.*);
-                            const MaskedWord = Table.V;
-                            const masked_word: MaskedWord = @truncate(word);
-                            table.set(Hasher.hash(masked_word), masked_word);
-                        }
-                    } else {
-                        const hash = std.mem.readInt(Hash, input[input_index..][0..HASH_BYTES], .little);
-                        input_index += HASH_BYTES;
-
-                        switch (layer_val) {
-                            inline 0...TABLES_COUNT - 1 => |index| {
-                                const table = self.tables.get(index);
-                                const Table = @TypeOf(table.*);
-                                const MaskedWord = Table.V;
-                                const masked_word = table.get(hash);
-
-                                const masked_word_bytes = @bitSizeOf(MaskedWord) / 8;
-                                const remaining_bytes = WORD_BYTES - masked_word_bytes;
-                                const word_bytes = std.mem.asBytes(&word);
-                                const masked_bytes = std.mem.asBytes(&masked_word);
-
-                                @memcpy(word_bytes[0..masked_word_bytes], masked_bytes[0..masked_word_bytes]);
-                                @memcpy(word_bytes[masked_word_bytes..WORD_BYTES], input[input_index..][0..remaining_bytes]);
-                                input_index += remaining_bytes;
-
-                                inline for (0..index + 1) |update_idx| {
-                                    const u_table = self.tables.get(update_idx);
-                                    const UMaskedWord = @TypeOf(u_table.*).V;
-                                    const u_masked: UMaskedWord = @truncate(word);
-                                    u_table.set(Hasher.hash(u_masked), u_masked);
-                                }
-                            },
-                            else => unreachable,
-                        }
-                    }
-
-                    std.mem.writeInt(Word, output[output_index..][0..WORD_BYTES], word, .little);
-                    output_index += WORD_BYTES;
+                    std.mem.writeInt(Word, output[output_index..][0..word_bytes], word, .little);
+                    output_index += word_bytes;
                 }
             }
 
@@ -253,7 +153,7 @@ pub fn OrangeDecoder(comptime Word: type, comptime Hash: type) type {
         }
 
         pub fn reset(self: *Self) void {
-            inline for (0..Tables.SIZE) |index| self.tables.get(index).fill(0);
+            self.table.fill(0);
         }
     };
 }
