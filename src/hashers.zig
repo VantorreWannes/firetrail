@@ -1,22 +1,35 @@
 const std = @import("std");
 
 pub fn NumberHasher(comptime Data: type, comptime Hash: type) type {
-    if (@bitSizeOf(Data) < @bitSizeOf(Hash)) @compileError("Data type cannot be larger than Hash type");
+    const data_info = @typeInfo(Data);
+    const hash_info = @typeInfo(Hash);
+    const data_size = @bitSizeOf(Data);
+    const hash_size = @bitSizeOf(Hash);
+
+    if (data_info != .int or data_info.int.signedness != .unsigned)
+        @compileError("NumberHasher requires an unsigned integer Data type, got: " ++ @typeName(Data));
+    if (hash_info != .int or hash_info.int.signedness != .unsigned)
+        @compileError("NumberHasher requires an unsigned integer Hash type, got: " ++ @typeName(Hash));
+    if (hash_size > data_size)
+        @compileError("Hash bit size must not exceed Data bit size");
+
     return struct {
-        const Self = @This();
-        const PRIME = switch (Data) {
-            u256 => 0x9E3779B97F4A7C15F390D159039E962B1D39343900132BE2400C547849D9CD77,
-            u128 => 0x9E3779B97F4A7C15F39CC0605CEDC7FD,
-            u64 => 0x9E3779B97F4A7C15,
-            u32 => 0x9D6EF916,
-            u16 => 0x9E3B,
-            u8 => 0x9D,
-            else => @compileError("Unsupported Data type size for Hasher"),
-        };
+        const PRIME: Data = fibonacciPrime(@bitSizeOf(Data));
         const SHIFT = @bitSizeOf(Data) - @bitSizeOf(Hash);
 
         pub inline fn hash(data: Data) Hash {
             return @truncate((data *% PRIME) >> SHIFT);
+        }
+
+        fn fibonacciPrime(comptime bits: comptime_int) comptime_int {
+            const target: comptime_int = 5 << (2 * (bits - 1));
+            var x: comptime_int = @as(comptime_int, 1) << (bits + 1);
+            while (true) {
+                const next = (x + target / x) >> 1;
+                if (next >= x) break;
+                x = next;
+            }
+            return (x - (@as(comptime_int, 1) << (bits - 1))) | 1;
         }
     };
 }
