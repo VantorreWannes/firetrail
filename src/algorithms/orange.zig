@@ -22,7 +22,9 @@ pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: 
         table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .table = try Table.init(allocator) };
+            var self = Self{ .table = try Table.init(allocator) };
+            self.reset();
+            return self;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -59,6 +61,7 @@ pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: 
                         std.mem.writeInt(Hash, output[output_index..][0..hash_bytes], hash, .little);
                         output_index += hash_bytes;
                         header |= 1 << token_index;
+                        
                     } else {
                         std.mem.writeInt(Word, output[output_index..][0..word_bytes], word, .little);
                         output_index += word_bytes;
@@ -101,7 +104,9 @@ pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: 
         table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .table = try Table.init(allocator) };
+            var self = Self{ .table = try Table.init(allocator) };
+            self.reset();
+            return self;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {

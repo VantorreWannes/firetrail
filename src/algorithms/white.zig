@@ -22,7 +22,9 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
         table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .table = try Table.init(allocator) };
+            var self = Self{ .table = try Table.init(allocator) };
+            self.reset();
+            return self;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -101,7 +103,9 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
         table: Table,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .table = try Table.init(allocator) };
+            var self = Self{ .table = try Table.init(allocator) };
+            self.reset();
+            return self;
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
