@@ -372,36 +372,48 @@ test "overwrite after growth keeps neighbours intact" {
     try testing.expectEqual(26, map.get(26).?);
 }
 
-pub fn HistoryTable(comptime Key: type, comptime Value: type, comptime ways: usize) type {
+pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: usize, comptime choices: usize) type {
     return struct {
         const Self = @This();
-        const size = 1 << @bitSizeOf(Key);
 
-        entries: [][ways]Value,
+        pub const K = Key;
+        pub const V = Value;
+
+        table: []Value,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .entries = try allocator.alloc([ways]Value, size) };
+            return .{ .table = try allocator.alloc(Value, size) };
+        }
+
+        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
+            if (buffer.len != size * @sizeOf(Value)) return error.InvalidTableSize;
+            return .{ .table = try allocator.dupe(Value, @alignCast(std.mem.bytesAsSlice(Value, buffer))) };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            allocator.free(self.entries);
+            allocator.free(self.table);
             self.* = undefined;
         }
 
         pub fn fill(self: *Self, value: Value) void {
-            @memset(self.entries, [_]Value{value} ** ways);
+            @memset(self.table, value);
         }
 
-        pub inline fn set(self: *Self, key: Key, value: Value) void {
-            const entries = [_]Value{value} ++ self.entries[key][1..];
-            self.entries[key] = entries.*;
+        pub inline fn probe(self: *Self, hashes: [choices]Key, word: Value) ?Key {
+            inline for (hashes) |h| {
+                if (self.table[h] == word) return h;
+            }
+            self.table[hashes[0]] = word;
+            return null;
         }
 
-        pub inline fn probe(self: *Self, key: Key, word: Value) bool {
-            const entries = self.entries[key];
-            inline for (entries) |value| if (word == value) return true;
-            self.set(key, word);
-            return false;
+
+        pub inline fn get(self: *const Self, key: Key) Value {
+            return self.table[key];
+        }
+
+        pub fn exportBuffer(self: *const Self) ![]u8 {
+            return std.mem.sliceAsBytes(self.table);
         }
     };
 }
