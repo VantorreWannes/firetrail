@@ -150,7 +150,7 @@ pub fn main(init: std.process.Init) !void {
 
         const input_data = try readFile(arena, io, file_path);
 
-        try addBenchmarks(&bench, arena, "White", firetrail.white.Encoder, firetrail.white.Decoder, file_path, input_data);
+        try addBenchmarks(&bench, arena, "Red", firetrail.red.Encoder, firetrail.red.Decoder, file_path, input_data);
         try addBenchmarks(&bench, arena, "Orange", firetrail.orange.Encoder, firetrail.orange.Decoder, file_path, input_data);
     }
 

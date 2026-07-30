@@ -101,7 +101,7 @@ const Config = struct {
     }
 };
 
-const block_size = 1024 * 4;
+const block_size = 1024 * 1024;
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
