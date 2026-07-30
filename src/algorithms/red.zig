@@ -2,12 +2,12 @@ const std = @import("std");
 const hashers = @import("../hashers.zig");
 const luts = @import("../luts.zig");
 
-pub const Encoder = WhiteEncoder(u64, u64, u8, u16, u16);
-pub const Decoder = WhiteDecoder(u64, u64, u8, u16, u16);
+pub const Encoder = RedEncoder(u64, u64, u8, u16, u16);
+pub const Decoder = RedDecoder(u64, u64, u8, u16, u16);
 
-pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
+pub fn RedEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash, 0);
-    const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache));
+    const Table = luts.FreqLookupTable(Hash, Word, u16, std.math.maxInt(Cache));
 
     return struct {
         const Self = @This();
@@ -70,10 +70,12 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
                         std.mem.writeInt(Hash, output[output_index..][0..hash_bytes], hash, .little);
                         output_index += hash_bytes;
                         header |= 1 << token_index;
+                        self.table.hit(hash);
                     } else {
                         std.mem.writeInt(Word, output[output_index..][0..word_bytes], word, .little);
                         output_index += word_bytes;
-                        // self.table.set(hash, word);
+                        self.table.miss(hash);
+                        self.table.set(hash, word);
                     }
                 }
 
@@ -95,11 +97,11 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
     };
 }
 
-pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
+pub fn RedDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash, 0);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache));
+        pub const Table = luts.FreqLookupTable(Hash, Word, u16, std.math.maxInt(Cache));
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);
@@ -151,11 +153,14 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
                     const word: Word = if ((header & (1 << token_index)) != 0) blk: {
                         const hash = std.mem.readInt(Hash, input[input_index..][0..hash_bytes], .little);
                         input_index += hash_bytes;
+                        self.table.hit(hash);
                         break :blk self.table.get(hash);
                     } else blk: {
                         const word = std.mem.readInt(Word, input[input_index..][0..word_bytes], .little);
                         input_index += word_bytes;
-                        // self.table.set(Hasher.hash(word), word);
+                        const hash = Hasher.hash(word);
+                        self.table.miss(hash);
+                        self.table.set(hash, word);
                         break :blk word;
                     };
 

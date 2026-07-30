@@ -113,14 +113,12 @@ fn addBenchmarks(
     warm_enc_param.* = WarmEncoderBenchmark(Encoder).init(warm_encoder, input_data, buf);
     try bench.addParam(warm_enc_name, @as(*const WarmEncoderBenchmark(Encoder), warm_enc_param), .{});
 
-
     const cold_decoder = try arena.create(Decoder);
     cold_decoder.* = try Decoder.init(arena);
     const cold_dec_name = try std.fmt.allocPrint(arena, label ++ " Decoder (cold): {s}", .{basename});
     const cold_dec_param = try arena.create(ColdDecoderBenchmark(Decoder));
     cold_dec_param.* = ColdDecoderBenchmark(Decoder).init(cold_decoder, compressed_data, decompressed_data);
     try bench.addParam(cold_dec_name, @as(*const ColdDecoderBenchmark(Decoder), cold_dec_param), .{});
-
 
     const warm_decoder = try arena.create(Decoder);
     warm_decoder.* = try Decoder.init(arena);

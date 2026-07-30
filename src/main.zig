@@ -10,6 +10,7 @@ const Mode = enum {
 const Algorithm = enum {
     white,
     orange,
+    red,
 };
 
 const Config = struct {
@@ -25,7 +26,7 @@ const Config = struct {
         errdefer allocator.free(args_slice);
 
         if (args_slice.len < 5) {
-            std.debug.print("Usage: {s} {{white|orange}} {{--encode|-e|--decode|-d}} <input> <output> [--import <lut_file>] [--export <lut_file>]\n", .{args_slice[0]});
+            std.debug.print("Usage: {s} {{white|orange|red}} {{--encode|-e|--decode|-d}} <input> <output> [--import <lut_file>] [--export <lut_file>]\n", .{args_slice[0]});
             return error.MissingArguments;
         }
 
@@ -33,6 +34,8 @@ const Config = struct {
             Algorithm.white
         else if (std.mem.eql(u8, args_slice[1], "orange"))
             Algorithm.orange
+        else if (std.mem.eql(u8, args_slice[1], "red"))
+            Algorithm.red
         else {
             std.debug.print("Invalid algorithm: {s}\n", .{args_slice[1]});
             return error.InvalidAlgorithm;
@@ -116,6 +119,7 @@ pub fn main(init: std.process.Init) !void {
                     const Encoder = switch (alg) {
                         .white => firetrail.white.Encoder,
                         .orange => firetrail.orange.Encoder,
+                        .red => firetrail.red.Encoder,
                     };
 
                     var encoder = if (config.import_stream) |import_stream| encoder: {
@@ -155,6 +159,7 @@ pub fn main(init: std.process.Init) !void {
                     const Decoder = switch (alg) {
                         .white => firetrail.white.Decoder,
                         .orange => firetrail.orange.Decoder,
+                        .red => firetrail.red.Decoder,
                     };
 
                     var decoder = if (config.import_stream) |import_stream| decoder: {

@@ -10,7 +10,7 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
         table: []Value,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size + 1);
+            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
             errdefer allocator.free(table);
             return .{ .table = table };
         }
@@ -21,7 +21,7 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
 
             if (data.len != size * @sizeOf(Value)) return error.InvalidTableSize;
 
-            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size + 1);
+            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
             errdefer allocator.free(table);
 
             @memcpy(std.mem.sliceAsBytes(table[0..size]), data);
@@ -131,56 +131,67 @@ pub fn FreqLookupTable(
         pub const V = Value;
         pub const C = Count;
 
-        const values_bytes = size * @sizeOf(Value);
-        const slot_counts_bytes = size * @sizeOf(Count);
-        const freq_bytes = size * @sizeOf(Count);
-        const total_bytes = values_bytes + slot_counts_bytes + freq_bytes;
-
         values: []Value,
-        slot_counts: []Count,
-        freq: []Count,
+        counts: []Count,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
             const values = try allocator.alloc(Value, size);
             errdefer allocator.free(values);
+            const counts = try allocator.alloc(Count, size);
+            return .{ .values = values, .counts = counts };
+        }
 
-            const slot_counts = try allocator.alloc(Count, size);
-            errdefer allocator.free(slot_counts);
+        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
+            const data = try reader.allocRemaining(allocator, .unlimited);
+            defer allocator.free(data);
 
-            const freq = try allocator.alloc(Count, size);
+            if (data.len != size * @sizeOf(Value)) return error.InvalidTableSize;
 
-            return .{
-                .values = values,
-                .slot_counts = slot_counts,
-                .freq = freq,
-            };
+            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
+            errdefer allocator.free(values);
+            @memcpy(std.mem.sliceAsBytes(values[0..size]), data);
+
+            const counts = try allocator.alloc(Count, size);
+            @memset(counts, 0);
+
+            return .{ .values = values, .counts = counts };
+        }
+
+        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
+            try writer.writeAll(std.mem.sliceAsBytes(self.values));
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.values);
-            allocator.free(self.slot_counts);
-            allocator.free(self.freq);
+            allocator.free(self.counts);
             self.* = undefined;
         }
 
         pub fn fill(self: *Self, value: Value) void {
             @memset(self.values, value);
-            @memset(self.slot_counts, 0);
-            @memset(self.freq, 0);
+            @memset(self.counts, 0);
         }
 
         pub inline fn get(self: *const Self, key: Key) Value {
             return self.values[key % size];
         }
 
-        pub inline fn set(self: *Self, key: Key, value: Value) void {
-            const index = key % size;
-            const new_freq = self.freq[index] +| 1;
-            self.freq[index] = new_freq;
+        pub inline fn hit(self: *Self, key: Key) void {
+            self.counts[key % size] +|= 1;
+        }
 
-            if (new_freq > self.slot_counts[index]) {
-                self.values[index] = value;
-                self.slot_counts[index] = new_freq;
+        pub inline fn miss(self: *Self, key: Key) void {
+            self.counts[key % size] -|= 1;
+        }
+
+        pub inline fn isEmpty(self: *Self, key: Key) bool {
+            return self.counts[key % size] == 0;
+        }
+
+        pub inline fn set(self: *Self, key: Key, value: Value) void {
+            if (self.isEmpty(key)) {
+                self.values[key % size] = value;
+                self.counts[key % size] = 1;
             }
         }
     };
@@ -374,11 +385,6 @@ pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: 
             return .{ .table = try allocator.alloc(Value, size) };
         }
 
-        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
-            if (buffer.len != size * @sizeOf(Value)) return error.InvalidTableSize;
-            return .{ .table = try allocator.dupe(Value, @alignCast(std.mem.bytesAsSlice(Value, buffer))) };
-        }
-
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.table);
             self.* = undefined;
@@ -398,10 +404,6 @@ pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: 
 
         pub inline fn get(self: *const Self, key: Key) Value {
             return self.table[key];
-        }
-
-        pub fn exportBuffer(self: *const Self) ![]u8 {
-            return std.mem.sliceAsBytes(self.table);
         }
     };
 }
