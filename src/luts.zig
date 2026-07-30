@@ -10,11 +10,27 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
         table: []Value,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .table = try allocator.alloc(Value, size + 1) };
+            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size + 1);
+            errdefer allocator.free(table);
+            return .{ .table = table };
         }
 
-        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
-            return Self{ .table = try allocator.dupe(Value, @alignCast(std.mem.bytesAsSlice(Value, buffer))) };
+        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
+            const data = try reader.allocRemaining(allocator, .unlimited);
+            defer allocator.free(data);
+
+            if (data.len != size * @sizeOf(Value)) return error.InvalidTableSize;
+
+            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size + 1);
+            errdefer allocator.free(table);
+
+            @memcpy(std.mem.sliceAsBytes(table[0..size]), data);
+            return .{ .table = table };
+        }
+
+        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
+            const data = std.mem.sliceAsBytes(self.table);
+            try writer.writeAll(data);
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -32,10 +48,6 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
 
         pub inline fn set(self: *Self, key: Key, value: Value) void {
             self.table[key % size] = value;
-        }
-
-        pub fn exportBuffer(self: *const Self) ![]u8 {
-            return std.mem.sliceAsBytes(self.table);
         }
     };
 }
@@ -144,19 +156,6 @@ pub fn FreqLookupTable(
             };
         }
 
-        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
-            if (buffer.len != total_bytes) return error.InvalidTableSize;
-
-            var self = try Self.init(allocator);
-            errdefer self.deinit(allocator);
-
-            @memcpy(std.mem.sliceAsBytes(self.values), buffer[0..values_bytes]);
-            @memcpy(std.mem.sliceAsBytes(self.slot_counts), buffer[values_bytes..][0..slot_counts_bytes]);
-            @memcpy(std.mem.sliceAsBytes(self.freq), buffer[values_bytes + slot_counts_bytes ..][0..freq_bytes]);
-
-            return self;
-        }
-
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.values);
             allocator.free(self.slot_counts);
@@ -183,16 +182,6 @@ pub fn FreqLookupTable(
                 self.values[index] = value;
                 self.slot_counts[index] = new_freq;
             }
-        }
-
-        pub fn exportBuffer(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
-            const buffer = try allocator.alloc(u8, total_bytes);
-
-            @memcpy(buffer[0..values_bytes], std.mem.sliceAsBytes(self.values));
-            @memcpy(buffer[values_bytes..][0..slot_counts_bytes], std.mem.sliceAsBytes(self.slot_counts));
-            @memcpy(buffer[values_bytes + slot_counts_bytes ..][0..freq_bytes], std.mem.sliceAsBytes(self.freq));
-
-            return buffer;
         }
     };
 }
@@ -406,7 +395,6 @@ pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: 
             self.table[hashes[0]] = word;
             return null;
         }
-
 
         pub inline fn get(self: *const Self, key: Key) Value {
             return self.table[key];

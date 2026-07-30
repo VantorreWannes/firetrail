@@ -1,4 +1,5 @@
 const std = @import("std");
+
 const firetrail = @import("root.zig");
 
 const Mode = enum {
@@ -24,7 +25,7 @@ const Config = struct {
         errdefer allocator.free(args_slice);
 
         if (args_slice.len < 5) {
-            std.debug.print("Usage: {s} {{white|orange}} {{encode|decode}} <input> <output> [--import <lut_file>] [--export <lut_file>]\n", .{args_slice[0]});
+            std.debug.print("Usage: {s} {{white|orange}} {{--encode|-e|--decode|-d}} <input> <output> [--import <lut_file>] [--export <lut_file>]\n", .{args_slice[0]});
             return error.MissingArguments;
         }
 
@@ -97,11 +98,16 @@ const Config = struct {
     }
 };
 
+const block_size = 1024 * 4;
+
 pub fn main(init: std.process.Init) !void {
-    const arena = init.arena.allocator();
+    const allocator = init.arena.allocator();
     const io = init.io;
-    var config = try Config.initFromArgs(arena, io, init.minimal.args);
-    defer config.deinit(arena, io);
+    var config = try Config.initFromArgs(allocator, io, init.minimal.args);
+    defer config.deinit(allocator, io);
+
+    var read_buffer: [block_size]u8 = undefined;
+    var write_buffer: [block_size]u8 = undefined;
 
     switch (config.mode) {
         .encode => {
@@ -112,34 +118,33 @@ pub fn main(init: std.process.Init) !void {
                         .orange => firetrail.orange.Encoder,
                     };
 
-                    var encoder = try Encoder.init(arena);
+                    var encoder = if (config.import_stream) |import_stream| encoder: {
+                        var reader = import_stream.reader(io, &read_buffer);
+                        break :encoder try Encoder.fromReader(allocator, &reader.interface);
+                    } else try Encoder.init(allocator);
 
-                    if (config.import_stream) |import_stream| {
-                        var import_buffer: [1024 * 4]u8 = undefined;
-                        var import_reader = import_stream.reader(io, &import_buffer);
-                        const import_slice = try import_reader.interface.allocRemaining(arena, .unlimited);
-                        defer arena.free(import_slice);
+                    defer encoder.deinit(allocator);
 
-                        const table = try Encoder.Table.initWithBuffer(arena, import_slice);
-                        encoder.deinit(arena);
-                        encoder = try Encoder.initWithTable(table);
+                    var input_buffer: [block_size]u8 = undefined;
+                    var output_buffer: [Encoder.outputBufferBound(block_size)]u8 = undefined;
+
+                    var input_reader = config.input_stream.reader(io, &read_buffer);
+                    var output_writer = config.output_stream.writer(io, &write_buffer);
+
+                    var input_length = try input_reader.interface.readSliceShort(&input_buffer);
+
+                    while (input_length > 0) {
+                        const output_length = encoder.compressBlockToBuffer(input_buffer[0..input_length], &output_buffer);
+                        try output_writer.interface.writeAll(output_buffer[0..output_length]);
+                        input_length = try input_reader.interface.readSliceShort(&input_buffer);
                     }
 
-                    defer encoder.deinit(arena);
-
-                    var input_buffer: [1024 * 4]u8 = undefined;
-                    var input_reader = config.input_stream.reader(io, &input_buffer);
-                    const input_slice = try input_reader.interface.allocRemaining(arena, .unlimited);
-
-                    const output_buffer_size = Encoder.outputBufferBound(input_slice.len);
-                    const output_buffer = try arena.alloc(u8, output_buffer_size);
-
-                    const output_bytes_written = encoder.compressBlockToBuffer(input_slice, output_buffer);
-                    try config.output_stream.writeStreamingAll(io, output_buffer[0..output_bytes_written]);
+                    try output_writer.interface.flush();
 
                     if (config.export_stream) |export_stream| {
-                        const export_buffer = try encoder.exportTable(arena);
-                        try export_stream.writeStreamingAll(io, export_buffer);
+                        var writer = export_stream.writer(io, &write_buffer);
+                        try encoder.toWriter(&writer.interface);
+                        try writer.interface.flush();
                     }
                 },
             }
@@ -152,30 +157,38 @@ pub fn main(init: std.process.Init) !void {
                         .orange => firetrail.orange.Decoder,
                     };
 
-                    var decoder = try Decoder.init(arena);
+                    var decoder = if (config.import_stream) |import_stream| decoder: {
+                        var reader = import_stream.reader(io, &read_buffer);
+                        break :decoder try Decoder.fromReader(allocator, &reader.interface);
+                    } else try Decoder.init(allocator);
 
-                    if (config.import_stream) |import_stream| {
-                        var import_buffer: [1024 * 4]u8 = undefined;
-                        var import_reader = import_stream.reader(io, &import_buffer);
-                        const import_slice = try import_reader.interface.allocRemaining(arena, .unlimited);
-                        defer arena.free(import_slice);
+                    defer decoder.deinit(allocator);
 
-                        const table = try Decoder.Table.initWithBuffer(arena, import_slice);
-                        decoder.deinit(arena);
-                        decoder = try Decoder.initWithTable(table);
+                    var input_reader = config.input_stream.reader(io, &read_buffer);
+                    const compressed = try input_reader.interface.allocRemaining(allocator, .unlimited);
+
+                    var output_writer = config.output_stream.writer(io, &write_buffer);
+
+                    var offset: usize = 0;
+                    while (offset < compressed.len) {
+                        const block = compressed[offset..];
+                        const output_len = Decoder.exactOutputLength(block);
+                        const output_buffer = try allocator.alloc(u8, output_len);
+
+                        const consumed = decoder.decompressBlockToBuffer(block, output_buffer);
+                        if (consumed == 0) return error.TruncatedInput;
+
+                        try output_writer.interface.writeAll(output_buffer);
+                        offset += consumed;
                     }
 
-                    defer decoder.deinit(arena);
+                    try output_writer.interface.flush();
 
-                    var input_buffer: [1024 * 4]u8 = undefined;
-                    var input_reader = config.input_stream.reader(io, &input_buffer);
-                    const input_slice = try input_reader.interface.allocRemaining(arena, .unlimited);
-
-                    const uncompressed_size = Decoder.exactOutputLength(input_slice);
-                    const output_buffer = try arena.alloc(u8, uncompressed_size);
-
-                    _ = decoder.decompressBlockToBuffer(input_slice, output_buffer);
-                    try config.output_stream.writeStreamingAll(io, output_buffer);
+                    if (config.export_stream) |export_stream| {
+                        var writer = export_stream.writer(io, &write_buffer);
+                        try decoder.toWriter(&writer.interface);
+                        try writer.interface.flush();
+                    }
                 },
             }
         },
