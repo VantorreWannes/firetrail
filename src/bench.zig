@@ -48,6 +48,64 @@ pub fn DecoderBenchmark(Decoder: type) type {
     };
 }
 
+pub fn TableExportBenchmark(Encoder: type) type {
+    return struct {
+        const Self = @This();
+        encoder: *Encoder,
+        input: []const u8,
+        output: []u8,
+
+        pub fn init(encoder: *Encoder, input: []const u8, output: []u8) Self {
+            return .{ .encoder = encoder, .input = input, .output = output };
+        }
+
+        pub fn run(self: *Self, _: std.mem.Allocator) void {
+            _ = self.encoder.compressBlockToBuffer(self.input, self.output);
+            _ = self.encoder.exportTable() catch {};
+        }
+    };
+}
+
+pub fn TableImportBenchmark(Decoder: type) type {
+    return struct {
+        const Self = @This();
+        decoder: *Decoder,
+        table_bytes: []const u8,
+        allocator: std.mem.Allocator,
+
+        pub fn init(allocator: std.mem.Allocator, decoder: *Decoder, table_bytes: []const u8) !Self {
+            return .{
+                .decoder = decoder,
+                .table_bytes = table_bytes,
+                .allocator = allocator,
+            };
+        }
+
+        pub fn run(self: *Self, _: std.mem.Allocator) void {
+            const table = Decoder.Table.initWithBuffer(self.allocator, self.table_bytes) catch unreachable;
+            self.decoder.deinit(self.allocator);
+            self.decoder.* = Decoder.initWithTable(table) catch unreachable;
+        }
+    };
+}
+
+pub fn WarmEncoderBenchmark(Encoder: type) type {
+    return struct {
+        const Self = @This();
+        encoder: *Encoder,
+        input: []const u8,
+        output: []u8,
+
+        pub fn init(encoder: *Encoder, input: []const u8, output: []u8) Self {
+            return .{ .encoder = encoder, .input = input, .output = output };
+        }
+
+        pub fn run(self: *Self, _: std.mem.Allocator) void {
+            _ = self.encoder.compressBlockToBuffer(self.input, self.output);
+        }
+    };
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const io = init.io;
@@ -74,53 +132,42 @@ pub fn main(init: std.process.Init) !void {
             encoder.* = try Encoder.init(arena);
 
             const output_data = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
-            const encoder_name = try std.fmt.allocPrint(arena, "White Encoder: {s}", .{std.fs.path.basename(file_path)});
+
+            const encoder_name = try std.fmt.allocPrint(arena, "White Encoder (cold): {s}", .{std.fs.path.basename(file_path)});
             const encoder_param = try arena.create(EncoderBenchmark(Encoder));
             encoder_param.* = EncoderBenchmark(Encoder).init(encoder, input_data, output_data);
             try bench.addParam(encoder_name, @as(*const EncoderBenchmark(Encoder), encoder_param), .{});
 
+            const export_name = try std.fmt.allocPrint(arena, "White Export: {s}", .{std.fs.path.basename(file_path)});
+            const export_param = try arena.create(TableExportBenchmark(Encoder));
+            export_param.* = TableExportBenchmark(Encoder).init(encoder, input_data, output_data);
+            try bench.addParam(export_name, @as(*const TableExportBenchmark(Encoder), export_param), .{});
+
+            const table_bytes = try encoder.exportTable();
+
             const Decoder = firetrail.white.Decoder;
             const decoder = try arena.create(Decoder);
             decoder.* = try Decoder.init(arena);
+
+            const import_name = try std.fmt.allocPrint(arena, "White Import: {s}", .{std.fs.path.basename(file_path)});
+            const import_param = try arena.create(TableImportBenchmark(Decoder));
+            import_param.* = try TableImportBenchmark(Decoder).init(arena, decoder, table_bytes);
+            try bench.addParam(import_name, @as(*const TableImportBenchmark(Decoder), import_param), .{});
+
+            const warm_name = try std.fmt.allocPrint(arena, "White Warm Encoder: {s}", .{std.fs.path.basename(file_path)});
+            const warm_param = try arena.create(WarmEncoderBenchmark(Encoder));
+            warm_param.* = WarmEncoderBenchmark(Encoder).init(encoder, input_data, output_data);
+            try bench.addParam(warm_name, @as(*const WarmEncoderBenchmark(Encoder), warm_param), .{});
 
             const compressed_buffer = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
             const compressed_size = encoder.compressBlockToBuffer(input_data, compressed_buffer);
             const compressed_data = compressed_buffer[0..compressed_size];
 
             const decompressed_data = try arena.alloc(u8, input_data.len);
-            const decoder_name = try std.fmt.allocPrint(arena, "White Decoder: {s}", .{std.fs.path.basename(file_path)});
 
+            const decoder_name = try std.fmt.allocPrint(arena, "White Decoder: {s}", .{std.fs.path.basename(file_path)});
             const decode_param = try arena.create(DecoderBenchmark(Decoder));
             decode_param.* = DecoderBenchmark(Decoder).init(decoder, compressed_data, decompressed_data);
-
-            try bench.addParam(decoder_name, @as(*const DecoderBenchmark(Decoder), decode_param), .{});
-        }
-
-        {
-            const Encoder = firetrail.orange.Encoder;
-            const encoder = try arena.create(Encoder);
-            encoder.* = try Encoder.init(arena);
-
-            const output_data = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
-            const encoder_name = try std.fmt.allocPrint(arena, "Orange Encoder: {s}", .{std.fs.path.basename(file_path)});
-            const encoder_param = try arena.create(EncoderBenchmark(Encoder));
-            encoder_param.* = EncoderBenchmark(Encoder).init(encoder, input_data, output_data);
-            try bench.addParam(encoder_name, @as(*const EncoderBenchmark(Encoder), encoder_param), .{});
-
-            const Decoder = firetrail.white.Decoder;
-            const decoder = try arena.create(Decoder);
-            decoder.* = try Decoder.init(arena);
-
-            const compressed_buffer = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
-            const compressed_size = encoder.compressBlockToBuffer(input_data, compressed_buffer);
-            const compressed_data = compressed_buffer[0..compressed_size];
-
-            const decompressed_data = try arena.alloc(u8, input_data.len);
-            const decoder_name = try std.fmt.allocPrint(arena, "White Decoder: {s}", .{std.fs.path.basename(file_path)});
-
-            const decode_param = try arena.create(DecoderBenchmark(Decoder));
-            decode_param.* = DecoderBenchmark(Decoder).init(decoder, compressed_data, decompressed_data);
-
             try bench.addParam(decoder_name, @as(*const DecoderBenchmark(Decoder), decode_param), .{});
         }
     }

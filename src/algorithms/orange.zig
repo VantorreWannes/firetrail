@@ -9,7 +9,7 @@ pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: 
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache));
+        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);
@@ -27,9 +27,7 @@ pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: 
         }
 
         pub fn initWithTable(table: Table) !Self {
-            var self = Self{ .table = table };
-            self.reset();
-            return self;
+            return Self{ .table = table };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -99,7 +97,7 @@ pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: 
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache));
+        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);
@@ -117,9 +115,7 @@ pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: 
         }
 
         pub fn initWithTable(table: Table) !Self {
-            var self = Self{ .table = table };
-            self.reset();
-            return self;
+            return Self{ .table = table };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
