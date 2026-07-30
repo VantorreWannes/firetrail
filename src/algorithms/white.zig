@@ -7,7 +7,7 @@ pub const Decoder = WhiteDecoder(u64, u64, u8, u16, u16);
 
 pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash, 0);
-    const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache));
+    const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
 
     return struct {
         const Self = @This();
@@ -73,7 +73,6 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
                     } else {
                         std.mem.writeInt(Word, output[output_index..][0..word_bytes], word, .little);
                         output_index += word_bytes;
-                        // self.table.set(hash, word);
                     }
                 }
 
@@ -99,7 +98,7 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash, 0);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache));
+        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);
@@ -155,7 +154,6 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
                     } else blk: {
                         const word = std.mem.readInt(Word, input[input_index..][0..word_bytes], .little);
                         input_index += word_bytes;
-                        // self.table.set(Hasher.hash(word), word);
                         break :blk word;
                     };
 

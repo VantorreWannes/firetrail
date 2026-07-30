@@ -407,3 +407,81 @@ pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: 
         }
     };
 }
+
+pub fn DecayLookupTable(
+    comptime Key: type,
+    comptime Value: type,
+    comptime Count: type,
+    comptime size: usize,
+) type {
+    if (@typeInfo(Key) != .int) @compileError("Key must be an integer type");
+    if (@typeInfo(Count) != .int) @compileError("Count must be an integer type");
+
+    return struct {
+        const Self = @This();
+
+        pub const K = Key;
+        pub const V = Value;
+        pub const C = Count;
+
+        values: []Value,
+        counts: []Count,
+
+        pub fn init(allocator: std.mem.Allocator) !Self {
+            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
+            errdefer allocator.free(values);
+            const counts = try allocator.alloc(Count, size);
+            return .{ .values = values, .counts = counts };
+        }
+
+        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
+            const data = try reader.allocRemaining(allocator, .unlimited);
+            defer allocator.free(data);
+
+            if (data.len != size * @sizeOf(Value)) return error.InvalidTableSize;
+
+            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
+            errdefer allocator.free(values);
+            @memcpy(std.mem.sliceAsBytes(values[0..size]), data);
+
+            const counts = try allocator.alloc(Count, size);
+            @memset(counts, 0);
+
+            return .{ .values = values, .counts = counts };
+        }
+
+        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
+            try writer.writeAll(std.mem.sliceAsBytes(self.values));
+        }
+
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            allocator.free(self.values);
+            allocator.free(self.counts);
+            self.* = undefined;
+        }
+
+        pub fn fill(self: *Self, value: Value) void {
+            @memset(self.values, value);
+            @memset(self.counts, 0);
+        }
+
+        pub inline fn get(self: *const Self, key: Key) Value {
+            return self.values[key % size];
+        }
+
+        pub inline fn hit(self: *Self, key: Key) void {
+            self.counts[key % size] +|= 1;
+        }
+
+        pub inline fn set(self: *Self, key: Key, value: Value) void {
+            const i = key % size;
+            const c = self.counts[i];
+            if (c == 0) {
+                self.values[i] = value;
+                self.counts[i] = 1;
+            } else {
+                self.counts[i] = c >> 1;
+            }
+        }
+    };
+}
