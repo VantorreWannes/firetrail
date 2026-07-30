@@ -2,10 +2,10 @@ const std = @import("std");
 const hashers = @import("../hashers.zig");
 const luts = @import("../luts.zig");
 
-pub const Encoder = WhiteEncoder(u64, u32, u8, u16, u16);
-pub const Decoder = WhiteDecoder(u64, u32, u8, u16, u16);
+pub const Encoder = OrangeEncoder(u64, u64, u8, u32, u21);
+pub const Decoder = OrangeDecoder(u64, u64, u8, u32, u21);
 
-pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
+pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash);
@@ -95,7 +95,7 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
     };
 }
 
-pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
+pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash);

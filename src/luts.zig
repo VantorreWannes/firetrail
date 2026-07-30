@@ -13,6 +13,10 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
             return .{ .table = try allocator.alloc(Value, size + 1) };
         }
 
+        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
+            return Self{ .table = try allocator.dupe(Value, @alignCast(std.mem.bytesAsSlice(Value, buffer))) };
+        }
+
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.table);
             self.* = undefined;
@@ -28,6 +32,10 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
 
         pub inline fn set(self: *Self, key: Key, value: Value) void {
             self.table[key % size] = value;
+        }
+
+        pub fn exportBuffer(self: *const Self) ![]u8 {
+            return std.mem.sliceAsBytes(self.table);
         }
     };
 }
