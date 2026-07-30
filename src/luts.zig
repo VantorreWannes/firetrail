@@ -13,6 +13,10 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
             return .{ .table = try allocator.alloc(Value, size + 1) };
         }
 
+        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
+            return Self{ .table = try allocator.dupe(Value, @alignCast(std.mem.bytesAsSlice(Value, buffer))) };
+        }
+
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.table);
             self.* = undefined;
@@ -28,6 +32,10 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
 
         pub inline fn set(self: *Self, key: Key, value: Value) void {
             self.table[key % size] = value;
+        }
+
+        pub fn exportBuffer(self: *const Self) ![]u8 {
+            return std.mem.sliceAsBytes(self.table);
         }
     };
 }
@@ -99,17 +107,22 @@ pub fn FreqLookupTable(
     comptime Key: type,
     comptime Value: type,
     comptime Count: type,
+    comptime size: usize,
 ) type {
     if (@typeInfo(Key) != .int) @compileError("Key must be an integer type");
     if (@typeInfo(Count) != .int) @compileError("Count must be an integer type");
 
     return struct {
         const Self = @This();
-        const size = 1 << @bitSizeOf(Key);
 
         pub const K = Key;
         pub const V = Value;
         pub const C = Count;
+
+        const values_bytes = size * @sizeOf(Value);
+        const slot_counts_bytes = size * @sizeOf(Count);
+        const freq_bytes = size * @sizeOf(Count);
+        const total_bytes = values_bytes + slot_counts_bytes + freq_bytes;
 
         values: []Value,
         slot_counts: []Count,
@@ -131,6 +144,19 @@ pub fn FreqLookupTable(
             };
         }
 
+        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
+            if (buffer.len != total_bytes) return error.InvalidTableSize;
+
+            var self = try Self.init(allocator);
+            errdefer self.deinit(allocator);
+
+            @memcpy(std.mem.sliceAsBytes(self.values), buffer[0..values_bytes]);
+            @memcpy(std.mem.sliceAsBytes(self.slot_counts), buffer[values_bytes..][0..slot_counts_bytes]);
+            @memcpy(std.mem.sliceAsBytes(self.freq), buffer[values_bytes + slot_counts_bytes ..][0..freq_bytes]);
+
+            return self;
+        }
+
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.values);
             allocator.free(self.slot_counts);
@@ -145,21 +171,28 @@ pub fn FreqLookupTable(
         }
 
         pub inline fn get(self: *const Self, key: Key) Value {
-            return self.values[key];
-        }
-
-        inline fn getCount(self: *const Self, key: Key) Count {
-            return self.slot_counts[key];
+            return self.values[key % size];
         }
 
         pub inline fn set(self: *Self, key: Key, value: Value) void {
-            const new_freq = self.freq[key] +| 1;
-            self.freq[key] = new_freq;
+            const index = key % size;
+            const new_freq = self.freq[index] +| 1;
+            self.freq[index] = new_freq;
 
-            if (new_freq > self.slot_counts[key]) {
-                self.values[key] = value;
-                self.slot_counts[key] = new_freq;
+            if (new_freq > self.slot_counts[index]) {
+                self.values[index] = value;
+                self.slot_counts[index] = new_freq;
             }
+        }
+
+        pub fn exportBuffer(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+            const buffer = try allocator.alloc(u8, total_bytes);
+
+            @memcpy(buffer[0..values_bytes], std.mem.sliceAsBytes(self.values));
+            @memcpy(buffer[values_bytes..][0..slot_counts_bytes], std.mem.sliceAsBytes(self.slot_counts));
+            @memcpy(buffer[values_bytes + slot_counts_bytes ..][0..freq_bytes], std.mem.sliceAsBytes(self.freq));
+
+            return buffer;
         }
     };
 }
@@ -339,36 +372,48 @@ test "overwrite after growth keeps neighbours intact" {
     try testing.expectEqual(26, map.get(26).?);
 }
 
-pub fn HistoryTable(comptime Key: type, comptime Value: type, comptime ways: usize) type {
+pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: usize, comptime choices: usize) type {
     return struct {
         const Self = @This();
-        const size = 1 << @bitSizeOf(Key);
 
-        entries: [][ways]Value,
+        pub const K = Key;
+        pub const V = Value;
+
+        table: []Value,
 
         pub fn init(allocator: std.mem.Allocator) !Self {
-            return .{ .entries = try allocator.alloc([ways]Value, size) };
+            return .{ .table = try allocator.alloc(Value, size) };
+        }
+
+        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
+            if (buffer.len != size * @sizeOf(Value)) return error.InvalidTableSize;
+            return .{ .table = try allocator.dupe(Value, @alignCast(std.mem.bytesAsSlice(Value, buffer))) };
         }
 
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            allocator.free(self.entries);
+            allocator.free(self.table);
             self.* = undefined;
         }
 
         pub fn fill(self: *Self, value: Value) void {
-            @memset(self.entries, [_]Value{value} ** ways);
+            @memset(self.table, value);
         }
 
-        pub inline fn set(self: *Self, key: Key, value: Value) void {
-            const entries = [_]Value{value} ++ self.entries[key][1..];
-            self.entries[key] = entries.*;
+        pub inline fn probe(self: *Self, hashes: [choices]Key, word: Value) ?Key {
+            inline for (hashes) |h| {
+                if (self.table[h] == word) return h;
+            }
+            self.table[hashes[0]] = word;
+            return null;
         }
 
-        pub inline fn probe(self: *Self, key: Key, word: Value) bool {
-            const entries = self.entries[key];
-            inline for (entries) |value| if (word == value) return true;
-            self.set(key, word);
-            return false;
+
+        pub inline fn get(self: *const Self, key: Key) Value {
+            return self.table[key];
+        }
+
+        pub fn exportBuffer(self: *const Self) ![]u8 {
+            return std.mem.sliceAsBytes(self.table);
         }
     };
 }

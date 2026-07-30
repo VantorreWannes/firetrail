@@ -2,14 +2,16 @@ const std = @import("std");
 const hashers = @import("../hashers.zig");
 const luts = @import("../luts.zig");
 
-pub const Encoder = WhiteEncoder(u64, u64, u8, u16, u16);
-pub const Decoder = WhiteDecoder(u64, u64, u8, u16, u16);
+pub const Encoder = OrangeEncoder(u64, u64, u8, u16, u16);
+pub const Decoder = OrangeDecoder(u64, u64, u8, u16, u16);
 
-pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
+pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
         const Self = @This();
+
         pub const Hasher = hashers.NumberHasher(Word, Hash, 0);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
+        pub const Hasher2 = hashers.NumberHasher(Word, Hash, 0x9E3779B97F4A7C15);
+        pub const Table = luts.ManyChoiceTable(Hash, Word, 1 << @bitSizeOf(Cache), 2);
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);
@@ -59,15 +61,14 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
                     const word = std.mem.readInt(Word, input[input_index..][0..word_bytes], .little);
                     input_index += word_bytes;
 
-                    const hash = Hasher.hash(word);
-                    if (word == self.table.get(hash)) {
-                        std.mem.writeInt(Hash, output[output_index..][0..hash_bytes], hash, .little);
+                    const hashes = [_]Hash{ Hasher.hash(word), Hasher2.hash(word) };
+                    if (self.table.probe(hashes, word)) |slot| {
+                        std.mem.writeInt(Hash, output[output_index..][0..hash_bytes], slot, .little);
                         output_index += hash_bytes;
                         header |= 1 << token_index;
                     } else {
                         std.mem.writeInt(Word, output[output_index..][0..word_bytes], word, .little);
                         output_index += word_bytes;
-                        self.table.set(hash, word);
                     }
                 }
 
@@ -94,11 +95,13 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
     };
 }
 
-pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
+pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
         const Self = @This();
+
         pub const Hasher = hashers.NumberHasher(Word, Hash, 0);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
+        pub const Hasher2 = hashers.NumberHasher(Word, Hash, 0x9E3779B97F4A7C15);
+        pub const Table = luts.ManyChoiceTable(Hash, Word, 1 << @bitSizeOf(Cache), 2);
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);
@@ -149,7 +152,7 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
                     } else blk: {
                         const word = std.mem.readInt(Word, input[input_index..][0..word_bytes], .little);
                         input_index += word_bytes;
-                        self.table.set(Hasher.hash(word), word);
+                        _ = self.table.probe(.{ Hasher.hash(word), Hasher2.hash(word) }, word);
                         break :blk word;
                     };
 
