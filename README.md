@@ -29,7 +29,7 @@ White is a direct one-to-one implementation of `skim`, the fastest compression a
 ### CLI Tool
 
 ```bash
-firetrail <white> [--encode | --decode] <input> <output>
+firetrail {white} [--encode | --decode] <input> <output>
 ```
 
 The argument `<input>` or `output` can be replaced with `-` to stream from `stdin` or to `stdout` respectively.
