@@ -101,7 +101,7 @@ const Config = struct {
     }
 };
 
-const block_size = 1024 * 1024;
+const block_size = 1024 * 1024 * 6;
 
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
@@ -109,8 +109,10 @@ pub fn main(init: std.process.Init) !void {
     var config = try Config.initFromArgs(allocator, io, init.minimal.args);
     defer config.deinit(allocator, io);
 
-    var read_buffer: [block_size]u8 = undefined;
-    var write_buffer: [block_size]u8 = undefined;
+    const read_buffer = try allocator.alloc(u8, block_size);
+    defer allocator.free(read_buffer);
+    const write_buffer = try allocator.alloc(u8, block_size);
+    defer allocator.free(write_buffer);
 
     switch (config.mode) {
         .encode => {
@@ -123,30 +125,32 @@ pub fn main(init: std.process.Init) !void {
                     };
 
                     var encoder = if (config.import_stream) |import_stream| encoder: {
-                        var reader = import_stream.reader(io, &read_buffer);
+                        var reader = import_stream.reader(io, read_buffer);
                         break :encoder try Encoder.fromReader(allocator, &reader.interface);
                     } else try Encoder.init(allocator);
 
                     defer encoder.deinit(allocator);
 
-                    var input_buffer: [block_size]u8 = undefined;
-                    var output_buffer: [Encoder.outputBufferBound(block_size)]u8 = undefined;
+                    var input_buffer = try allocator.alloc(u8, block_size);
+                    defer allocator.free(input_buffer);
+                    var output_buffer = try allocator.alloc(u8, Encoder.outputBufferBound(block_size));
+                    defer allocator.free(output_buffer);
 
-                    var input_reader = config.input_stream.reader(io, &read_buffer);
-                    var output_writer = config.output_stream.writer(io, &write_buffer);
+                    var input_reader = config.input_stream.reader(io, read_buffer);
+                    var output_writer = config.output_stream.writer(io, write_buffer);
 
-                    var input_length = try input_reader.interface.readSliceShort(&input_buffer);
+                    var input_length = try input_reader.interface.readSliceShort(input_buffer);
 
                     while (input_length > 0) {
-                        const output_length = encoder.compressBlockToBuffer(input_buffer[0..input_length], &output_buffer);
+                        const output_length = encoder.compressBlockToBuffer(input_buffer[0..input_length], output_buffer);
                         try output_writer.interface.writeAll(output_buffer[0..output_length]);
-                        input_length = try input_reader.interface.readSliceShort(&input_buffer);
+                        input_length = try input_reader.interface.readSliceShort(input_buffer);
                     }
 
                     try output_writer.interface.flush();
 
                     if (config.export_stream) |export_stream| {
-                        var writer = export_stream.writer(io, &write_buffer);
+                        var writer = export_stream.writer(io, write_buffer);
                         try encoder.toWriter(&writer.interface);
                         try writer.interface.flush();
                     }
@@ -163,16 +167,16 @@ pub fn main(init: std.process.Init) !void {
                     };
 
                     var decoder = if (config.import_stream) |import_stream| decoder: {
-                        var reader = import_stream.reader(io, &read_buffer);
+                        var reader = import_stream.reader(io, read_buffer);
                         break :decoder try Decoder.fromReader(allocator, &reader.interface);
                     } else try Decoder.init(allocator);
 
                     defer decoder.deinit(allocator);
 
-                    var input_reader = config.input_stream.reader(io, &read_buffer);
+                    var input_reader = config.input_stream.reader(io, read_buffer);
                     const compressed = try input_reader.interface.allocRemaining(allocator, .unlimited);
 
-                    var output_writer = config.output_stream.writer(io, &write_buffer);
+                    var output_writer = config.output_stream.writer(io, write_buffer);
 
                     var offset: usize = 0;
                     while (offset < compressed.len) {
@@ -190,7 +194,7 @@ pub fn main(init: std.process.Init) !void {
                     try output_writer.interface.flush();
 
                     if (config.export_stream) |export_stream| {
-                        var writer = export_stream.writer(io, &write_buffer);
+                        var writer = export_stream.writer(io, write_buffer);
                         try decoder.toWriter(&writer.interface);
                         try writer.interface.flush();
                     }
