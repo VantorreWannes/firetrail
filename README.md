@@ -23,3 +23,13 @@ White is a direct one-to-one implementation of `skim`, the fastest compression a
 ## Benchmark plot
 
 ![plot.png](./plot.png)
+
+## Usage
+
+### CLI Tool
+
+```bash
+firetrail <white> [--encode | --decode] <input> <output>
+```
+
+The argument `<input>` or `output` can be replaced with `-` to stream from `stdin` or to `stdout` respectively.
