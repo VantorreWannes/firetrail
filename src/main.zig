@@ -22,7 +22,7 @@ pub fn main(init: std.process.Init) !void {
     const output_arg = if (args.len > 4) args[4] else null;
 
     if (program_arg == null or algorithm_arg == null or mode_arg == null or input_arg == null or output_arg == null) {
-        std.debug.print("Usage: {s} {white} [--encode | --decode] <input> <output>\n", .{program_arg orelse "firetrail"});
+        std.debug.print("Usage: {s} {{white}} [--encode | --decode] <input> <output>\n", .{program_arg orelse "firetrail"});
         return error.MissingArguments;
     }
 
@@ -33,14 +33,14 @@ pub fn main(init: std.process.Init) !void {
     const output_value = output_arg.?;
 
     if (std.mem.eql(u8, input_value, output_value)) {
-        std.debug.print("Usage: {s} {white} [--encode | --decode] <input> <output>\n", .{program_value});
+        std.debug.print("Usage: {s} {{white}} [--encode | --decode] <input> <output>\n", .{program_value});
         return error.InputEqualsOutput;
     }
 
     const algorithm = if (std.mem.eql(u8, algorithm_value, "white"))
         Algorithm.white
     else {
-        std.debug.print("Usage: {s} {white} [--encode | --decode] <input> <output>\n", .{program_value});
+        std.debug.print("Usage: {s} {{white}} [--encode | --decode] <input> <output>\n", .{program_value});
         return error.InvalidAlgorithm;
     };
 
@@ -49,7 +49,7 @@ pub fn main(init: std.process.Init) !void {
     else if (std.mem.eql(u8, mode_value, "--decode") or std.mem.eql(u8, mode_value, "-d"))
         Mode.decode
     else {
-        std.debug.print("Usage: {s} {white} [--encode | --decode] <input> <output>\n", .{program_value});
+        std.debug.print("Usage: {s} {{white}} [--encode | --decode] <input> <output>\n", .{program_value});
         return error.InvalidMode;
     };
 
