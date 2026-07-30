@@ -2,14 +2,14 @@ const std = @import("std");
 const hashers = @import("../hashers.zig");
 const luts = @import("../luts.zig");
 
-pub const Encoder = OrangeEncoder(u64, u64, u8, u32, u21);
-pub const Decoder = OrangeDecoder(u64, u64, u8, u32, u21);
+pub const Encoder = OrangeEncoder(u64, u64, u8, u16, u16);
+pub const Decoder = OrangeDecoder(u64, u64, u8, u16, u16);
 
 pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
+        pub const Table = luts.FreqLookupTable(Hash, Word, u16, std.math.maxInt(Cache) + 1);
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);
@@ -83,8 +83,8 @@ pub fn OrangeEncoder(comptime Size: type, comptime Word: type, comptime Header: 
             return output_index;
         }
 
-        pub fn exportTable(self: *Self) ![]u8 {
-            return self.table.exportBuffer();
+        pub fn exportTable(self: *Self, allocator: std.mem.Allocator) ![]u8 {
+            return self.table.exportBuffer(allocator);
         }
 
         pub fn reset(self: *Self) void {
@@ -97,7 +97,7 @@ pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: 
     return struct {
         const Self = @This();
         pub const Hasher = hashers.NumberHasher(Word, Hash);
-        pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
+        pub const Table = luts.FreqLookupTable(Hash, Word, u16, std.math.maxInt(Cache) + 1);
 
         const header_bits = @bitSizeOf(Header);
         const word_bytes = @sizeOf(Word);

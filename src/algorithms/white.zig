@@ -2,8 +2,8 @@ const std = @import("std");
 const hashers = @import("../hashers.zig");
 const luts = @import("../luts.zig");
 
-pub const Encoder = WhiteEncoder(u64, u32, u8, u16, u16);
-pub const Decoder = WhiteDecoder(u64, u32, u8, u16, u16);
+pub const Encoder = WhiteEncoder(u64, u64, u8, u16, u16);
+pub const Decoder = WhiteDecoder(u64, u64, u8, u16, u16);
 
 pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
@@ -83,7 +83,8 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
             return output_index;
         }
 
-        pub fn exportTable(self: *Self) ![]u8 {
+        pub fn exportTable(self: *Self, allocator: std.mem.Allocator) ![]u8 {
+            _ = allocator;
             return self.table.exportBuffer();
         }
 

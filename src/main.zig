@@ -138,7 +138,7 @@ pub fn main(init: std.process.Init) !void {
                     try config.output_stream.writeStreamingAll(io, output_buffer[0..output_bytes_written]);
 
                     if (config.export_stream) |export_stream| {
-                        const export_buffer = try encoder.exportTable();
+                        const export_buffer = try encoder.exportTable(arena);
                         try export_stream.writeStreamingAll(io, export_buffer);
                     }
                 },

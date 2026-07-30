@@ -107,17 +107,22 @@ pub fn FreqLookupTable(
     comptime Key: type,
     comptime Value: type,
     comptime Count: type,
+    comptime size: usize,
 ) type {
     if (@typeInfo(Key) != .int) @compileError("Key must be an integer type");
     if (@typeInfo(Count) != .int) @compileError("Count must be an integer type");
 
     return struct {
         const Self = @This();
-        const size = 1 << @bitSizeOf(Key);
 
         pub const K = Key;
         pub const V = Value;
         pub const C = Count;
+
+        const values_bytes = size * @sizeOf(Value);
+        const slot_counts_bytes = size * @sizeOf(Count);
+        const freq_bytes = size * @sizeOf(Count);
+        const total_bytes = values_bytes + slot_counts_bytes + freq_bytes;
 
         values: []Value,
         slot_counts: []Count,
@@ -139,6 +144,19 @@ pub fn FreqLookupTable(
             };
         }
 
+        pub fn initWithBuffer(allocator: std.mem.Allocator, buffer: []const u8) !Self {
+            if (buffer.len != total_bytes) return error.InvalidTableSize;
+
+            var self = try Self.init(allocator);
+            errdefer self.deinit(allocator);
+
+            @memcpy(std.mem.sliceAsBytes(self.values), buffer[0..values_bytes]);
+            @memcpy(std.mem.sliceAsBytes(self.slot_counts), buffer[values_bytes..][0..slot_counts_bytes]);
+            @memcpy(std.mem.sliceAsBytes(self.freq), buffer[values_bytes + slot_counts_bytes ..][0..freq_bytes]);
+
+            return self;
+        }
+
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.values);
             allocator.free(self.slot_counts);
@@ -153,21 +171,28 @@ pub fn FreqLookupTable(
         }
 
         pub inline fn get(self: *const Self, key: Key) Value {
-            return self.values[key];
-        }
-
-        inline fn getCount(self: *const Self, key: Key) Count {
-            return self.slot_counts[key];
+            return self.values[key % size];
         }
 
         pub inline fn set(self: *Self, key: Key, value: Value) void {
-            const new_freq = self.freq[key] +| 1;
-            self.freq[key] = new_freq;
+            const index = key % size;
+            const new_freq = self.freq[index] +| 1;
+            self.freq[index] = new_freq;
 
-            if (new_freq > self.slot_counts[key]) {
-                self.values[key] = value;
-                self.slot_counts[key] = new_freq;
+            if (new_freq > self.slot_counts[index]) {
+                self.values[index] = value;
+                self.slot_counts[index] = new_freq;
             }
+        }
+
+        pub fn exportBuffer(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+            const buffer = try allocator.alloc(u8, total_bytes);
+
+            @memcpy(buffer[0..values_bytes], std.mem.sliceAsBytes(self.values));
+            @memcpy(buffer[values_bytes..][0..slot_counts_bytes], std.mem.sliceAsBytes(self.slot_counts));
+            @memcpy(buffer[values_bytes + slot_counts_bytes ..][0..freq_bytes], std.mem.sliceAsBytes(self.freq));
+
+            return buffer;
         }
     };
 }
