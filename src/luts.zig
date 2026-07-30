@@ -106,7 +106,6 @@ pub fn FreqLookupTable(
     return struct {
         const Self = @This();
         const size = 1 << @bitSizeOf(Key);
-        const max_count = std.math.maxInt(Count);
 
         pub const K = Key;
         pub const V = Value;
@@ -338,4 +337,38 @@ test "overwrite after growth keeps neighbours intact" {
     try testing.expectEqual(50, map.count);
     try testing.expectEqual(24, map.get(24).?);
     try testing.expectEqual(26, map.get(26).?);
+}
+
+pub fn HistoryTable(comptime Key: type, comptime Value: type, comptime ways: usize) type {
+    return struct {
+        const Self = @This();
+        const size = 1 << @bitSizeOf(Key);
+
+        entries: [][ways]Value,
+
+        pub fn init(allocator: std.mem.Allocator) !Self {
+            return .{ .entries = try allocator.alloc([ways]Value, size) };
+        }
+
+        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
+            allocator.free(self.entries);
+            self.* = undefined;
+        }
+
+        pub fn fill(self: *Self, value: Value) void {
+            @memset(self.entries, [_]Value{value} ** ways);
+        }
+
+        pub inline fn set(self: *Self, key: Key, value: Value) void {
+            const entries = [_]Value{value} ++ self.entries[key][1..];
+            self.entries[key] = entries.*;
+        }
+
+        pub inline fn probe(self: *Self, key: Key, word: Value) bool {
+            const entries = self.entries[key];
+            inline for (entries) |value| if (word == value) return true;
+            self.set(key, word);
+            return false;
+        }
+    };
 }
