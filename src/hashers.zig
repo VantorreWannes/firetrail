@@ -1,5 +1,9 @@
 const std = @import("std");
 
+/// A multiplicative Fibonacci hasher mapping unsigned integers of type `Data`
+/// to smaller unsigned integers of type `Hash`.
+///
+/// The `seed` perturbs the multiplier so different seeds produce different hash families.
 pub fn NumberHasher(comptime Data: type, comptime Hash: type, comptime seed: Data) type {
     const data_info = @typeInfo(Data);
     const hash_info = @typeInfo(Hash);
@@ -17,6 +21,7 @@ pub fn NumberHasher(comptime Data: type, comptime Hash: type, comptime seed: Dat
         const PRIME: Data = fibonacciPrime(@bitSizeOf(Data)) ^ (seed | 1);
         const SHIFT = @bitSizeOf(Data) - @bitSizeOf(Hash);
 
+        /// Hashes `data` into a `Hash`-sized value.
         pub inline fn hash(data: Data) Hash {
             return @truncate((data *% PRIME) >> SHIFT);
         }

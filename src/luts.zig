@@ -1,20 +1,29 @@
 const std = @import("std");
 
+/// Fixed-size direct-mapped lookup table backed by a single array.
+/// Keys are mapped to slots via `key % size`.
 pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size: usize) type {
     return struct {
         const Self = @This();
 
+        /// Key type of the table.
         pub const K = Key;
+        /// Value type of the table.
         pub const V = Value;
 
-        table: []Value,
+        table: []align(64) Value,
 
+        /// Allocates a table of `size` slots. Slots start undefined; call
+        /// `fill` before use.
         pub fn init(allocator: std.mem.Allocator) !Self {
             const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
             errdefer allocator.free(table);
             return .{ .table = table };
         }
 
+        /// Reads a table previously written with `toWriter`.
+        ///
+        /// Returns `error.InvalidTableSize` if the data does not match the expected byte size.
         pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
             const data = try reader.allocRemaining(allocator, .unlimited);
             defer allocator.free(data);
@@ -28,24 +37,29 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
             return .{ .table = table };
         }
 
+        /// Writes the raw table contents to `writer`, suitable for `fromReader`.
         pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
             const data = std.mem.sliceAsBytes(self.table);
             try writer.writeAll(data);
         }
 
+        /// Frees the backing storage.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.table);
             self.* = undefined;
         }
 
+        /// Sets every entry in the table to `value`.
         pub fn fill(self: *Self, value: Value) void {
             @memset(self.table, value);
         }
 
+        /// Returns the value stored for `key`.
         pub inline fn get(self: *const Self, key: Key) Value {
             return self.table[key % size];
         }
 
+        /// Stores `value` for `key`, overwriting any colliding entry.
         pub inline fn set(self: *Self, key: Key, value: Value) void {
             self.table[key % size] = value;
         }
@@ -82,6 +96,25 @@ test "fill" {
     try std.testing.expectEqual(@as(u8, 0), lut.get(1));
 }
 
+test "writer round trip" {
+    const Lut = ArrayLookupTable(u8, u8, 4);
+    var lut = try Lut.init(std.testing.allocator);
+    defer lut.deinit(std.testing.allocator);
+    lut.fill(7);
+
+    var writer = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer writer.deinit();
+    try lut.toWriter(&writer.writer);
+
+    var reader = std.Io.Reader.fixed(writer.written());
+    var restored = try Lut.fromReader(std.testing.allocator, &reader);
+    defer restored.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u8, 7), restored.get(0));
+}
+
+/// A heterogeneous container holding one lookup table per type in `lookup_table_types`,
+/// addressed by comptime index.
 pub fn StructLookupTable(comptime lookup_table_types: []const type) type {
     comptime var field_names: [lookup_table_types.len][]const u8 = undefined;
     inline for (&field_names, 0..) |*name, index| {
@@ -99,15 +132,18 @@ pub fn StructLookupTable(comptime lookup_table_types: []const type) type {
     return struct {
         const Self = @This();
 
+        /// The number of tables held by this container.
         pub const size = lookup_table_types.len;
 
         container: Container,
 
+        /// Returns a pointer to the table at comptime `index`.
         pub fn get(self: *const Self, comptime index: usize) *lookup_table_types[index] {
             const field_name = comptime std.mem.asBytes(index);
             return &@field(self.container, field_name);
         }
 
+        /// Replaces the table at comptime `index` with `value`.
         pub fn set(self: *Self, comptime index: usize, value: lookup_table_types[index]) void {
             const field_name = comptime std.mem.asBytes(index);
             @field(self.container, field_name) = value;
@@ -115,6 +151,11 @@ pub fn StructLookupTable(comptime lookup_table_types: []const type) type {
     };
 }
 
+/// A fixed-size lookup table with per-entry frequency counters.
+///
+/// Entries are only written when their slot is empty (count == 0); `hit` and `miss`
+/// adjust the counters with saturating arithmetic, letting frequently used entries
+/// resist eviction.
 pub fn FreqLookupTable(
     comptime Key: type,
     comptime Value: type,
@@ -127,20 +168,27 @@ pub fn FreqLookupTable(
     return struct {
         const Self = @This();
 
+        /// The key type used to index the table.
         pub const K = Key;
+        /// The value type stored in the table.
         pub const V = Value;
+        /// The counter type tracking per-entry frequency.
         pub const C = Count;
 
-        values: []Value,
+        values: []align(64) Value,
         counts: []Count,
 
+        /// Allocates a table of `size` entries with zeroed counters.
         pub fn init(allocator: std.mem.Allocator) !Self {
-            const values = try allocator.alloc(Value, size);
+            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
             errdefer allocator.free(values);
             const counts = try allocator.alloc(Count, size);
             return .{ .values = values, .counts = counts };
         }
 
+        /// Reads values previously written with `toWriter`; counters start at zero.
+        ///
+        /// Returns `error.InvalidTableSize` if the data does not match the expected byte size.
         pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
             const data = try reader.allocRemaining(allocator, .unlimited);
             defer allocator.free(data);
@@ -157,37 +205,45 @@ pub fn FreqLookupTable(
             return .{ .values = values, .counts = counts };
         }
 
+        /// Writes the raw values to `writer`, suitable for `fromReader`. Counters are not persisted.
         pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
             try writer.writeAll(std.mem.sliceAsBytes(self.values));
         }
 
+        /// Frees the backing storage.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.values);
             allocator.free(self.counts);
             self.* = undefined;
         }
 
+        /// Sets every value to `value` and resets all counters to zero.
         pub fn fill(self: *Self, value: Value) void {
             @memset(self.values, value);
             @memset(self.counts, 0);
         }
 
+        /// Returns the value stored for `key`.
         pub inline fn get(self: *const Self, key: Key) Value {
             return self.values[key % size];
         }
 
+        /// Increments the frequency counter for `key` (saturating).
         pub inline fn hit(self: *Self, key: Key) void {
             self.counts[key % size] +|= 1;
         }
 
+        /// Records a cache miss for `key`, saturating its counter at zero.
         pub inline fn miss(self: *Self, key: Key) void {
             self.counts[key % size] -|= 1;
         }
 
+        /// Returns true if the entry for `key` has a zero counter.
         pub inline fn isEmpty(self: *Self, key: Key) bool {
             return self.counts[key % size] == 0;
         }
 
+        /// Stores `value` for `key` only if the slot is empty, setting its counter to 1.
         pub inline fn set(self: *Self, key: Key, value: Value) void {
             if (self.isEmpty(key)) {
                 self.values[key % size] = value;
@@ -197,6 +253,63 @@ pub fn FreqLookupTable(
     };
 }
 
+test "FreqLookupTable set and get" {
+    const Lut = FreqLookupTable(u8, u8, u8, 2);
+    var lut = try Lut.init(std.testing.allocator);
+    defer lut.deinit(std.testing.allocator);
+    lut.fill(0);
+
+    lut.set(1, 42);
+    try std.testing.expectEqual(@as(u8, 42), lut.get(1));
+    try std.testing.expect(!lut.isEmpty(1));
+}
+
+test "FreqLookupTable set only writes when empty" {
+    const Lut = FreqLookupTable(u8, u8, u8, 2);
+    var lut = try Lut.init(std.testing.allocator);
+    defer lut.deinit(std.testing.allocator);
+    lut.fill(0);
+
+    lut.set(1, 42);
+    lut.set(1, 99);
+    try std.testing.expectEqual(@as(u8, 42), lut.get(1));
+}
+
+test "FreqLookupTable hit and miss adjust counters" {
+    const Lut = FreqLookupTable(u8, u8, u8, 2);
+    var lut = try Lut.init(std.testing.allocator);
+    defer lut.deinit(std.testing.allocator);
+    lut.fill(0);
+
+    try std.testing.expect(lut.isEmpty(0));
+    lut.hit(0);
+    try std.testing.expect(!lut.isEmpty(0));
+    lut.miss(0);
+    try std.testing.expect(lut.isEmpty(0));
+}
+
+test "FreqLookupTable writer round trip" {
+    const Lut = FreqLookupTable(u8, u8, u8, 2);
+    var lut = try Lut.init(std.testing.allocator);
+    defer lut.deinit(std.testing.allocator);
+    lut.fill(0);
+    lut.set(1, 42);
+
+    var writer = std.Io.Writer.Allocating.init(std.testing.allocator);
+    defer writer.deinit();
+    try lut.toWriter(&writer.writer);
+
+    var reader = std.Io.Reader.fixed(writer.written());
+    var restored = try Lut.fromReader(std.testing.allocator, &reader);
+    defer restored.deinit(std.testing.allocator);
+
+    try std.testing.expectEqual(@as(u8, 42), restored.get(1));
+    try std.testing.expect(restored.isEmpty(1));
+}
+
+/// An open-addressing hash map from `Hash` keys to `Value`s with linear probing.
+///
+/// Grows automatically as entries are inserted.
 pub fn HashValueMap(comptime Hash: type, comptime Value: type) type {
     const info = @typeInfo(Hash);
     comptime if (info != .int or info.int.signedness != .unsigned)
@@ -209,10 +322,12 @@ pub fn HashValueMap(comptime Hash: type, comptime Value: type) type {
         data: []Value,
         count: usize,
 
+        /// Creates an empty map with no initial capacity.
         pub fn init(allocator: std.mem.Allocator) !Self {
             return try Self.initWithCapacity(allocator, 0);
         }
 
+        /// Creates a map with space for `capacity` entries pre-allocated.
         pub fn initWithCapacity(allocator: std.mem.Allocator, capacity: usize) !Self {
             const keys = try allocator.alloc(?Hash, capacity);
             errdefer allocator.free(keys);
@@ -220,6 +335,7 @@ pub fn HashValueMap(comptime Hash: type, comptime Value: type) type {
             return .{ .keys = keys, .data = data, .count = capacity };
         }
 
+        /// Frees the backing storage.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.keys);
             allocator.free(self.data);
@@ -261,6 +377,7 @@ pub fn HashValueMap(comptime Hash: type, comptime Value: type) type {
             self.data = new_data;
         }
 
+        /// Inserts or overwrites the value for `hash`, growing the map if needed.
         pub fn set(self: *Self, allocator: std.mem.Allocator, hash: Hash, value: Value) !void {
             if (self.shouldGrow()) try self.grow(allocator);
             std.debug.assert(self.keys.len > 0);
@@ -271,12 +388,14 @@ pub fn HashValueMap(comptime Hash: type, comptime Value: type) type {
             self.data[index] = value;
         }
 
+        /// Returns true if `hash` is present in the map.
         pub fn contains(self: *const Self, hash: Hash) bool {
             if (self.keys.len == 0) return false;
             const index = slotFor(self.keys, hash);
             return self.keys[index] != null;
         }
 
+        /// Returns the value for `hash`, or null if it is not present.
         pub fn get(self: *const Self, hash: Hash) ?Value {
             if (self.keys.len == 0) return null;
             const index = slotFor(self.keys, hash);
@@ -372,28 +491,39 @@ test "overwrite after growth keeps neighbours intact" {
     try testing.expectEqual(26, map.get(26).?);
 }
 
+/// A fixed-size lookup table that probes multiple candidate slots per key.
+///
+/// On `probe`, each of the `choices` candidate hashes is checked; if none match,
+/// the first candidate slot is overwritten.
 pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: usize, comptime choices: usize) type {
     return struct {
         const Self = @This();
 
+        /// The key type used to index the table.
         pub const K = Key;
+        /// The value type stored in the table.
         pub const V = Value;
 
         table: []Value,
 
+        /// Allocates a table of `size` entries.
         pub fn init(allocator: std.mem.Allocator) !Self {
             return .{ .table = try allocator.alloc(Value, size) };
         }
 
+        /// Frees the backing storage.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             allocator.free(self.table);
             self.* = undefined;
         }
 
+        /// Sets every entry in the table to `value`.
         pub fn fill(self: *Self, value: Value) void {
             @memset(self.table, value);
         }
 
+        /// Checks each candidate hash for `word`; returns the matching hash on a hit,
+        /// otherwise stores `word` in the first candidate slot and returns null.
         pub inline fn probe(self: *Self, hashes: [choices]Key, word: Value) ?Key {
             inline for (hashes) |h| {
                 if (self.table[h] == word) return h;
@@ -402,86 +532,9 @@ pub fn ManyChoiceTable(comptime Key: type, comptime Value: type, comptime size: 
             return null;
         }
 
+        /// Returns the value stored at `key`.
         pub inline fn get(self: *const Self, key: Key) Value {
             return self.table[key];
-        }
-    };
-}
-
-pub fn DecayLookupTable(
-    comptime Key: type,
-    comptime Value: type,
-    comptime Count: type,
-    comptime size: usize,
-) type {
-    if (@typeInfo(Key) != .int) @compileError("Key must be an integer type");
-    if (@typeInfo(Count) != .int) @compileError("Count must be an integer type");
-
-    return struct {
-        const Self = @This();
-
-        pub const K = Key;
-        pub const V = Value;
-        pub const C = Count;
-
-        values: []Value,
-        counts: []Count,
-
-        pub fn init(allocator: std.mem.Allocator) !Self {
-            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
-            errdefer allocator.free(values);
-            const counts = try allocator.alloc(Count, size);
-            return .{ .values = values, .counts = counts };
-        }
-
-        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
-            const data = try reader.allocRemaining(allocator, .unlimited);
-            defer allocator.free(data);
-
-            if (data.len != size * @sizeOf(Value)) return error.InvalidTableSize;
-
-            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
-            errdefer allocator.free(values);
-            @memcpy(std.mem.sliceAsBytes(values[0..size]), data);
-
-            const counts = try allocator.alloc(Count, size);
-            @memset(counts, 0);
-
-            return .{ .values = values, .counts = counts };
-        }
-
-        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
-            try writer.writeAll(std.mem.sliceAsBytes(self.values));
-        }
-
-        pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
-            allocator.free(self.values);
-            allocator.free(self.counts);
-            self.* = undefined;
-        }
-
-        pub fn fill(self: *Self, value: Value) void {
-            @memset(self.values, value);
-            @memset(self.counts, 0);
-        }
-
-        pub inline fn get(self: *const Self, key: Key) Value {
-            return self.values[key % size];
-        }
-
-        pub inline fn hit(self: *Self, key: Key) void {
-            self.counts[key % size] +|= 1;
-        }
-
-        pub inline fn set(self: *Self, key: Key, value: Value) void {
-            const i = key % size;
-            const c = self.counts[i];
-            if (c == 0) {
-                self.values[i] = value;
-                self.counts[i] = 1;
-            } else {
-                self.counts[i] = c >> 1;
-            }
         }
     };
 }

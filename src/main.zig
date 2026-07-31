@@ -21,6 +21,10 @@ const Config = struct {
     import_stream: ?std.Io.File,
     export_stream: ?std.Io.File,
 
+    /// Parses command-line arguments and opens the corresponding streams.
+    ///
+    /// Expects: `<algorithm> <--encode|-e|--decode|-d> <input> <output> [--import <lut_file>] [--export <lut_file>]`.
+    /// Passing `-` for a path selects stdin/stdout respectively.
     pub fn initFromArgs(allocator: std.mem.Allocator, io: std.Io, args: std.process.Args) !Config {
         const args_slice = try args.toSlice(allocator);
         errdefer allocator.free(args_slice);
@@ -92,6 +96,7 @@ const Config = struct {
         };
     }
 
+    /// Closes all streams opened by `initFromArgs`.
     pub fn deinit(self: *Config, allocator: std.mem.Allocator, io: std.Io) void {
         _ = allocator;
         self.input_stream.close(io);
@@ -103,6 +108,7 @@ const Config = struct {
 
 const block_size = 1024 * 1024 * 6;
 
+/// Entry point: encodes or decodes a stream with the algorithm selected on the command line.
 pub fn main(init: std.process.Init) !void {
     const allocator = init.arena.allocator();
     const io = init.io;
