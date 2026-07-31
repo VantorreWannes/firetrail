@@ -14,11 +14,11 @@ Firetrail comes in three flavors, all built around the same idea: hash 8-byte wo
 
 ### On `silesia.tar` (mixed corpus, zbench, warm)
 
-| | Encode | Decode | Ratio |
-|---|---|---|---|
+|                      | Encode     | Decode     | Ratio        |
+| -------------------- | ---------- | ---------- | ------------ |
 | White (trained dict) | ~4.67 GB/s | ~7.55 GB/s | ~23.4% saved |
-| Orange | ~3.17 GB/s | ~5.37 GB/s | ~35.2% saved |
-| Red | ~1.57 GB/s | ~1.95 GB/s | ~34.4% saved |
+| Orange               | ~3.17 GB/s | ~5.37 GB/s | ~35.2% saved |
+| Red                  | ~1.57 GB/s | ~1.95 GB/s | ~34.4% saved |
 
 ### lz4 (for reference)
 
@@ -57,4 +57,3 @@ zig build bench --release=fast -- data/silesia.tar
 ```
 
 Cold runs use an empty table; warm runs use a dictionary trained by red on the input itself.
-`
