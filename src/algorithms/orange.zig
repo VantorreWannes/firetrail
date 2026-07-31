@@ -156,6 +156,12 @@ pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: 
             self.* = undefined;
         }
 
+        /// Returns the maximum number of compressed bytes a block of `len` decompressed bytes can occupy.
+        pub fn outputBufferBound(len: usize) usize {
+            const blocks = len / batch_bytes;
+            return len + (blocks * header_bytes) + header_bytes + word_bytes + size_bytes;
+        }
+
         /// Returns the decompressed length of a block produced by `compressBlockToBuffer`.
         pub fn exactOutputLength(input: []const u8) usize {
             return @intCast(std.mem.readInt(Size, input[0..size_bytes], .little));
