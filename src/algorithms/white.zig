@@ -143,7 +143,6 @@ test "round trip with trailing partial batch" {
     try expectRoundTrip(Encoder, Decoder, input);
 }
 
-
 /// A dictionary decoder that reconstructs words from their hashes.
 ///
 /// The white variant mirrors `WhiteEncoder`: it uses a static dictionary that must
@@ -171,7 +170,7 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
             self.reset();
             return self;
         }
-        
+
         /// Creates an encoder with a dictionary previously written with `toSlice`.
         pub fn fromSlice(allocator: std.mem.Allocator, slice: []u8) !Self {
             const table = try Table.fromSlice(allocator, slice);

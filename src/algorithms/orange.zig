@@ -147,7 +147,7 @@ pub fn OrangeDecoder(comptime Size: type, comptime Word: type, comptime Header: 
 
         /// Writes the dictionary to `writer`, suitable for `fromSlice`.
         pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
-           return try self.table.toSlice(allocator);
+            return try self.table.toSlice(allocator);
         }
 
         /// Frees the dictionary storage.
@@ -246,4 +246,3 @@ test "round trip with trailing partial batch" {
     const input = "abc";
     try expectRoundTrip(Encoder, Decoder, input);
 }
-
