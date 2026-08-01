@@ -141,11 +141,6 @@ pub fn main(init: std.process.Init) !void {
     var config = try Config.initFromParameters(allocator, io, &parameters);
     defer config.deinit(allocator, io);
 
-    const input_buffer = try allocator.alloc(u8, block_size);
-    defer allocator.free(input_buffer);
-    const output_buffer = try allocator.alloc(u8, block_size + block_size / 8 + 64);
-    defer allocator.free(output_buffer);
-
     switch (config.mode) {
         .encode => {
             switch (config.algorithm) {
@@ -156,33 +151,32 @@ pub fn main(init: std.process.Init) !void {
                         .red => firetrail.red.Encoder,
                     };
 
-                    var encoder = try if (config.import) |import_file| blk: {
-                        const import_size = try import_file.length(io);
-                        var import = try import_file.createMemoryMap(io, .{
-                            .populate = true,
-                            .len = import_size,
-                            .protection = .{ .read = true },
-                        });
-                        defer import.destroy(io);
-                        break :blk Encoder.fromSlice(allocator, import.memory);
-                    } else Encoder.init(allocator);
+                    var encoder = if (config.import) |file| blk: {
+                        var import_reader = file.readerStreaming(io, &.{});
+                        const import_slice = try import_reader.interface.allocRemaining(allocator, .unlimited);
+                        defer allocator.free(import_slice);
+                        break :blk try Encoder.fromSlice(allocator, import_slice);
+                    } else try Encoder.init(allocator);
                     defer encoder.deinit(allocator);
 
+                    const input_buffer = try allocator.alloc(u8, block_size);
+                    defer allocator.free(input_buffer);
+                    const output_data_buffer = try allocator.alloc(u8, Encoder.outputBufferBound(block_size));
+                    defer allocator.free(output_data_buffer);
+
+                    var input_reader = config.input.readerStreaming(io, input_buffer);
+
                     while (true) {
-                        var input_reader = config.input.readerStreaming(io, input_buffer);
-                        const input_size = try input_reader.interface.readSliceShort(input_buffer);
-                        if (input_size == 0) break;
+                        const input = input_reader.interface.peek(input_buffer.len) catch |err| switch (err) {
+                            error.EndOfStream => input_reader.interface.buffered(),
+                            else => return err,
+                        };
+                        if (input.len == 0) break;
 
-                        const output_size = encoder.compressBlockToBuffer(input_buffer[0..input_size], output_buffer);
-
-                        var frame_len: [frame_len_bytes]u8 = undefined;
-                        std.mem.writeInt(u64, &frame_len, @intCast(output_size), .little);
-                        try config.output.writeStreamingAll(io, &frame_len);
-                        try config.output.writeStreamingAll(io, output_buffer[0..output_size]);
+                        const output_size = encoder.compressBlockToBuffer(input, output_data_buffer);
+                        input_reader.interface.toss(input.len);
+                        try config.output.writeStreamingAll(io, output_data_buffer[0..output_size]);
                     }
-
-                    const frame_len: [frame_len_bytes]u8 = @splat(0);
-                    try config.output.writeStreamingAll(io, &frame_len);
 
                     if (config.@"export") |@"export"| {
                         const slice = try encoder.toSlice(allocator);
@@ -200,39 +194,44 @@ pub fn main(init: std.process.Init) !void {
                         .orange => firetrail.orange.Decoder,
                         .red => firetrail.red.Decoder,
                     };
+                    const Encoder = switch (algorithm) {
+                        .white => firetrail.white.Encoder,
+                        .orange => firetrail.orange.Encoder,
+                        .red => firetrail.red.Encoder,
+                    };
 
-                    var decoder = try if (config.import) |import_file| blk: {
-                        const import_size = try import_file.length(io);
-                        var import = try import_file.createMemoryMap(io, .{
-                            .populate = true,
-                            .len = import_size,
-                            .protection = .{ .read = true },
-                        });
-                        defer import.destroy(io);
-                        break :blk Decoder.fromSlice(allocator, import.memory);
-                    } else Decoder.init(allocator);
+                    var decoder = if (config.import) |file| blk: {
+                        var import_reader = file.readerStreaming(io, &.{});
+                        const import_slice = try import_reader.interface.allocRemaining(allocator, .unlimited);
+                        defer allocator.free(import_slice);
+                        break :blk try Decoder.fromSlice(allocator, import_slice);
+                    } else try Decoder.init(allocator);
                     defer decoder.deinit(allocator);
+                    const reader_buffer = try allocator.alloc(u8, Encoder.outputBufferBound(block_size));
+                    defer allocator.free(reader_buffer);
+                    const output_buffer = try allocator.alloc(u8, block_size);
+                    defer allocator.free(output_buffer);
 
-                    var frame_len: [frame_len_bytes]u8 = undefined;
-                    var frame_reader = config.input.readerStreaming(io, &frame_len);
+                    var input_reader = config.input.readerStreaming(io, reader_buffer);
+
                     while (true) {
-                        frame_reader.interface.readSliceAll(&frame_len) catch |err| switch (err) {
+                        _ = input_reader.interface.peekByte() catch |err| switch (err) {
                             error.EndOfStream => break,
                             else => return err,
                         };
-                        const compressed_len = std.mem.readInt(u64, &frame_len, .little);
-                        if (compressed_len == 0) break;
 
-                        var input_reader = config.input.readerStreaming(io, input_buffer);
-                        try input_reader.interface.readSliceAll(input_buffer[0..compressed_len]);
-                        const input = input_buffer[0..compressed_len];
+                        const header = try input_reader.interface.peek(Decoder.size_bytes * 2);
+                        const output_data_size = Decoder.exactOutputLength(header[0..Decoder.size_bytes]);
+                        const input_data_size = Decoder.exactInputLength(header[Decoder.size_bytes..]);
 
-                        const len = Decoder.exactOutputLength(input);
-                        if (len > output_buffer.len) return error.BlockTooLarge;
-                        const consumed = decoder.decompressBlockToBuffer(input, output_buffer);
-                        if (consumed != compressed_len) return error.CorruptFrame;
+                        if (output_data_size > output_buffer.len) return error.BlockTooLarge;
+                        if (input_data_size > reader_buffer.len) return error.BlockTooLarge;
 
-                        try config.output.writeStreamingAll(io, output_buffer[0..len]);
+                        const block = try input_reader.interface.peek(input_data_size);
+                        input_reader.interface.toss(input_data_size);
+
+                        _ = decoder.decompressBlockToBuffer(block, output_buffer);
+                        try config.output.writeStreamingAll(io, output_buffer[0..output_data_size]);
                     }
 
                     if (config.@"export") |@"export"| {

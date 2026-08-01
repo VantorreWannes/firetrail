@@ -25,7 +25,7 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
         const word_bytes = @sizeOf(Word);
         const header_bytes = @sizeOf(Header);
         const hash_bytes = @sizeOf(Hash);
-        const size_bytes = @sizeOf(Size);
+        pub const size_bytes = @sizeOf(Size);
         const batch_bytes = header_bits * word_bytes;
 
         table: Table,
@@ -71,6 +71,7 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
 
             std.mem.writeInt(Size, output[0..size_bytes], @intCast(input.len), .little);
             output_index += size_bytes;
+            output_index += size_bytes;
 
             while (input_index < loop_limit) {
                 const header_pos = output_index;
@@ -100,6 +101,8 @@ pub fn WhiteEncoder(comptime Size: type, comptime Word: type, comptime Header: t
                 @memcpy(output[output_index .. output_index + remaining], input[input_index .. input_index + remaining]);
                 output_index += remaining;
             }
+
+            std.mem.writeInt(Size, output[size_bytes .. size_bytes * 2], @intCast(output_index), .little);
 
             return output_index;
         }
@@ -159,7 +162,7 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
         const word_bytes = @sizeOf(Word);
         const header_bytes = @sizeOf(Header);
         const hash_bytes = @sizeOf(Hash);
-        const size_bytes = @sizeOf(Size);
+        pub const size_bytes = @sizeOf(Size);
         const batch_bytes = header_bits * word_bytes;
 
         table: Table,
@@ -188,14 +191,13 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
             self.* = undefined;
         }
 
-        /// Returns the maximum number of compressed bytes a block of `len` decompressed bytes can occupy.
-        pub fn outputBufferBound(len: usize) usize {
-            const blocks = len / batch_bytes;
-            return len + (blocks * header_bytes) + header_bytes + word_bytes + size_bytes;
-        }
-
         /// Returns the decompressed length of a block produced by `compressBlockToBuffer`.
         pub fn exactOutputLength(input: []const u8) usize {
+            return @intCast(std.mem.readInt(Size, input[0..size_bytes], .little));
+        }
+
+        /// Returns the compressed length of a block produced by `compressBlockToBuffer`.
+        pub fn exactInputLength(input: []const u8) usize {
             return @intCast(std.mem.readInt(Size, input[0..size_bytes], .little));
         }
 
@@ -207,7 +209,7 @@ pub fn WhiteDecoder(comptime Size: type, comptime Word: type, comptime Header: t
             const len = exactOutputLength(input);
             const loop_limit = (len / batch_bytes) * batch_bytes;
 
-            var input_index: usize = size_bytes;
+            var input_index: usize = size_bytes * 2;
             var output_index: usize = 0;
 
             while (output_index < loop_limit) {
