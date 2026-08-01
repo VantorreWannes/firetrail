@@ -106,7 +106,7 @@ fn addBenchmarks(
 
     var dict_reader = std.Io.Reader.fixed(dictionary);
     const warm_encoder = try arena.create(Encoder);
-    warm_encoder.* = try Encoder.fromReader(arena, &dict_reader);
+    warm_encoder.* = try Encoder.fromSlice(arena, &dict_reader);
     const compressed_size = warm_encoder.compressBlockToBuffer(input_data, buf);
     const compressed_data = try arena.dupe(u8, buf[0..compressed_size]);
 
@@ -124,7 +124,7 @@ fn addBenchmarks(
 
     var dict_reader2 = std.Io.Reader.fixed(dictionary);
     const warm_decoder = try arena.create(Decoder);
-    warm_decoder.* = try Decoder.fromReader(arena, &dict_reader2);
+    warm_decoder.* = try Decoder.fromSlice(arena, &dict_reader2);
     _ = warm_decoder.decompressBlockToBuffer(compressed_data, decompressed_data);
 
     const warm_dec_name = try std.fmt.allocPrint(arena, label ++ " Decoder (warm): {s}", .{basename});
@@ -142,7 +142,7 @@ fn trainDictionary(arena: std.mem.Allocator, input_data: []const u8) ![]u8 {
     _ = encoder.compressBlockToBuffer(input_data, buf);
 
     var dict_writer = std.Io.Writer.Allocating.init(arena);
-    try encoder.toWriter(&dict_writer.writer);
+    try encoder.toSlice(&dict_writer.writer);
     return dict_writer.toOwnedSlice();
 }
 

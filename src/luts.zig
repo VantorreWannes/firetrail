@@ -11,36 +11,30 @@ pub fn ArrayLookupTable(comptime Key: type, comptime Value: type, comptime size:
         /// Value type of the table.
         pub const V = Value;
 
-        table: []align(64) Value,
+        table: []Value,
 
         /// Allocates a table of `size` slots. Slots start undefined; call
         /// `fill` before use.
         pub fn init(allocator: std.mem.Allocator) !Self {
-            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
+            const table = try allocator.alloc(Value, size);
             errdefer allocator.free(table);
             return .{ .table = table };
         }
 
-        /// Reads a table previously written with `toWriter`.
+        /// Reads a table previously exported with `toSlice`.
         ///
-        /// Returns `error.InvalidTableSize` if the data does not match the expected byte size.
-        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
-            const data = try reader.allocRemaining(allocator, .unlimited);
-            defer allocator.free(data);
-
-            if (data.len != size * @sizeOf(Value)) return error.InvalidTableSize;
-
-            const table = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
-            errdefer allocator.free(table);
-
-            @memcpy(std.mem.sliceAsBytes(table[0..size]), data);
-            return .{ .table = table };
+        /// Returns `error.InvalidTableSize` if the slice does not match the expected byte size.
+        pub fn fromSlice(allocator: std.mem.Allocator, slice: []u8) !Self {
+            if (slice.len != size * @sizeOf(Value)) return error.InvalidTableSize;
+            const table = try allocator.alloc(Value, size);
+            @memcpy(std.mem.sliceAsBytes(table), slice);
+            return Self{ .table = table };
         }
 
-        /// Writes the raw table contents to `writer`, suitable for `fromReader`.
-        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
-            const data = std.mem.sliceAsBytes(self.table);
-            try writer.writeAll(data);
+        /// Writes the raw table contents to a slice, suitable for `fromSlice`.
+        pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+            const table = try allocator.dupe(Value, self.table);
+            return std.mem.sliceAsBytes(table);
         }
 
         /// Frees the backing storage.
@@ -94,23 +88,6 @@ test "fill" {
     defer lut.deinit(std.testing.allocator);
     lut.fill(0);
     try std.testing.expectEqual(@as(u8, 0), lut.get(1));
-}
-
-test "writer round trip" {
-    const Lut = ArrayLookupTable(u8, u8, 4);
-    var lut = try Lut.init(std.testing.allocator);
-    defer lut.deinit(std.testing.allocator);
-    lut.fill(7);
-
-    var writer = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer writer.deinit();
-    try lut.toWriter(&writer.writer);
-
-    var reader = std.Io.Reader.fixed(writer.written());
-    var restored = try Lut.fromReader(std.testing.allocator, &reader);
-    defer restored.deinit(std.testing.allocator);
-
-    try std.testing.expectEqual(@as(u8, 7), restored.get(0));
 }
 
 /// A heterogeneous container holding one lookup table per type in `lookup_table_types`,
@@ -175,39 +152,33 @@ pub fn FreqLookupTable(
         /// The counter type tracking per-entry frequency.
         pub const C = Count;
 
-        values: []align(64) Value,
+        values: []Value,
         counts: []Count,
 
         /// Allocates a table of `size` entries with zeroed counters.
         pub fn init(allocator: std.mem.Allocator) !Self {
-            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
+            const values = try allocator.alloc(Value, size);
             errdefer allocator.free(values);
             const counts = try allocator.alloc(Count, size);
             return .{ .values = values, .counts = counts };
         }
 
-        /// Reads values previously written with `toWriter`; counters start at zero.
+        /// Reads values previously written with `toSlice`; counters start at zero.
         ///
-        /// Returns `error.InvalidTableSize` if the data does not match the expected byte size.
-        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
-            const data = try reader.allocRemaining(allocator, .unlimited);
-            defer allocator.free(data);
-
-            if (data.len != size * @sizeOf(Value)) return error.InvalidTableSize;
-
-            const values = try allocator.alignedAlloc(Value, std.mem.Alignment.@"64", size);
-            errdefer allocator.free(values);
-            @memcpy(std.mem.sliceAsBytes(values[0..size]), data);
-
+        /// Returns `error.InvalidTableSize` if the data does not match the expected byte size
+        pub fn fromSlice(allocator: std.mem.Allocator, slice: []u8) !Self {
+            if (slice.len != size * @sizeOf(Value)) return error.InvalidTableSize;
+            const values = try allocator.alloc(Value, size);
+            @memcpy(std.mem.sliceAsBytes(values), slice);
             const counts = try allocator.alloc(Count, size);
             @memset(counts, 0);
-
-            return .{ .values = values, .counts = counts };
+            return Self{ .values = values, .counts = counts };
         }
 
-        /// Writes the raw values to `writer`, suitable for `fromReader`. Counters are not persisted.
-        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
-            try writer.writeAll(std.mem.sliceAsBytes(self.values));
+        /// Writes the raw values to a slice, suitable for `fromSlice`. Counters are not persisted.
+        pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+            const values = try allocator.dupe(u64, self.values);
+            return std.mem.sliceAsBytes(values);
         }
 
         /// Frees the backing storage.
@@ -286,25 +257,6 @@ test "FreqLookupTable hit and miss adjust counters" {
     try std.testing.expect(!lut.isEmpty(0));
     lut.miss(0);
     try std.testing.expect(lut.isEmpty(0));
-}
-
-test "FreqLookupTable writer round trip" {
-    const Lut = FreqLookupTable(u8, u8, u8, 2);
-    var lut = try Lut.init(std.testing.allocator);
-    defer lut.deinit(std.testing.allocator);
-    lut.fill(0);
-    lut.set(1, 42);
-
-    var writer = std.Io.Writer.Allocating.init(std.testing.allocator);
-    defer writer.deinit();
-    try lut.toWriter(&writer.writer);
-
-    var reader = std.Io.Reader.fixed(writer.written());
-    var restored = try Lut.fromReader(std.testing.allocator, &reader);
-    defer restored.deinit(std.testing.allocator);
-
-    try std.testing.expectEqual(@as(u8, 42), restored.get(1));
-    try std.testing.expect(restored.isEmpty(1));
 }
 
 /// An open-addressing hash map from `Hash` keys to `Value`s with linear probing.

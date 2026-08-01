@@ -37,15 +37,15 @@ pub fn RedEncoder(comptime Size: type, comptime Word: type, comptime Header: typ
             return self;
         }
 
-        /// Creates an encoder with a dictionary previously written with `toWriter`.
-        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
-            const table = try Table.fromReader(allocator, reader);
+        /// Creates an encoder with a dictionary previously written with `toSlice`.
+        pub fn fromSlice(allocator: std.mem.Allocator, slice: []u8) !Self {
+            const table = try Table.fromSlice(allocator, slice);
             return Self{ .table = table };
         }
 
-        /// Writes the dictionary to `writer`, suitable for `fromReader`.
-        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
-            try self.table.toWriter(writer);
+        /// Writes the dictionary to `writer`, suitable for `fromSlice`.
+        pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+            return try self.table.toSlice(allocator);
         }
 
         /// Frees the dictionary storage.
@@ -142,15 +142,15 @@ pub fn RedDecoder(comptime Size: type, comptime Word: type, comptime Header: typ
             return self;
         }
 
-        /// Creates a decoder with a dictionary previously written with `toWriter`.
-        pub fn fromReader(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Self {
-            const table = try Table.fromReader(allocator, reader);
+        /// Creates an encoder with a dictionary previously written with `toSlice`.
+        pub fn fromSlice(allocator: std.mem.Allocator, slice: []u8) !Self {
+            const table = try Table.fromSlice(allocator, slice);
             return Self{ .table = table };
         }
 
-        /// Writes the dictionary to `writer`, suitable for `fromReader`.
-        pub fn toWriter(self: *const Self, writer: *std.Io.Writer) !void {
-            try self.table.toWriter(writer);
+        /// Writes the dictionary to `writer`, suitable for `fromSlice`.
+        pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
+            return try self.table.toSlice(allocator);
         }
 
         /// Frees the dictionary storage.
@@ -251,17 +251,4 @@ test "round trip" {
 test "round trip with trailing partial batch" {
     const input = "abc";
     try expectRoundTrip(Encoder, Decoder, input);
-}
-
-test "dictionary writer round trip" {
-    var encoder = try Encoder.init(testing.allocator);
-    defer encoder.deinit(testing.allocator);
-
-    var writer = std.Io.Writer.Allocating.init(testing.allocator);
-    defer writer.deinit();
-    try encoder.toWriter(&writer.writer);
-
-    var reader = std.Io.Reader.fixed(writer.written());
-    var restored = try Encoder.fromReader(testing.allocator, &reader);
-    defer restored.deinit(testing.allocator);
 }
