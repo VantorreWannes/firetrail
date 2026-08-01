@@ -3,6 +3,9 @@ const builtin = @import("builtin");
 
 const firetrail = @import("root.zig");
 
+const block_size = 8 * 1024 * 1024;
+const frame_len_bytes = @sizeOf(u64);
+
 const Parameters = struct {
     const Self = @This();
 
@@ -72,6 +75,7 @@ const Parameters = struct {
         if (self.@"export") |value| allocator.free(value);
     }
 };
+
 const Config = struct {
     const Self = @This();
     const alignment = std.heap.page_size_min;
@@ -87,16 +91,11 @@ const Config = struct {
         red,
     };
 
-    pub const File = struct {
-        file: std.Io.File,
-        is_std: bool,
-    };
-
     name: []u8,
     algorithm: Algorithm,
     mode: Mode,
-    input: File,
-    output: File,
+    input: std.Io.File,
+    output: std.Io.File,
     import: ?std.Io.File,
     @"export": ?std.Io.File,
 
@@ -112,15 +111,13 @@ const Config = struct {
         errdefer allocator.free(name);
         const algorithm = try if (std.mem.eql(u8, algorithm_value, "white")) Algorithm.white else if (std.mem.eql(u8, algorithm_value, "orange")) Algorithm.orange else if (std.mem.eql(u8, algorithm_value, "red")) Algorithm.red else error.InvalidAlgorithm;
         const mode = try if (std.mem.eql(u8, mode_value, "encode")) Mode.encode else if (std.mem.eql(u8, mode_value, "decode")) Mode.decode else error.InvalidMode;
-        const input_is_std = std.mem.eql(u8, input_value, "-");
-        const input = File{ .file = if (input_is_std) std.Io.File.stdin() else try cwd.openFile(io, input_value, .{}), .is_std = input_is_std };
-        errdefer if (!input.is_std) input.file.close(io);
-        const output_is_std = std.mem.eql(u8, output_value, "-");
-        const output = File{ .file = if (output_is_std) std.Io.File.stdout() else try cwd.createFile(io, output_value, .{ .read = true }), .is_std = output_is_std };
-        errdefer if (!output.is_std) output.file.close(io);
+        const input = if (std.mem.eql(u8, input_value, "-")) std.Io.File.stdin() else try cwd.openFile(io, input_value, .{});
+        errdefer input.close(io);
+        const output = if (std.mem.eql(u8, output_value, "-")) std.Io.File.stdout() else try cwd.createFile(io, output_value, .{});
+        errdefer output.close(io);
         const import = if (parameters.import) |import| try cwd.openFile(io, import, .{}) else null;
         errdefer if (import) |file| file.close(io);
-        const @"export" = if (parameters.@"export") |@"export"| try cwd.createFile(io, @"export", .{ .read = true }) else null;
+        const @"export" = if (parameters.@"export") |@"export"| try cwd.createFile(io, @"export", .{}) else null;
         errdefer if (@"export") |file| file.close(io);
 
         return .{ .name = name, .algorithm = algorithm, .mode = mode, .input = input, .output = output, .import = import, .@"export" = @"export" };
@@ -128,8 +125,8 @@ const Config = struct {
 
     pub fn deinit(self: *Self, allocator: std.mem.Allocator, io: std.Io) void {
         allocator.free(self.name);
-        if (!self.input.is_std) self.input.file.close(io);
-        if (!self.output.is_std) self.output.file.close(io);
+        self.input.close(io);
+        self.output.close(io);
         if (self.import) |file| file.close(io);
         if (self.@"export") |file| file.close(io);
     }
@@ -144,6 +141,11 @@ pub fn main(init: std.process.Init) !void {
     var config = try Config.initFromParameters(allocator, io, &parameters);
     defer config.deinit(allocator, io);
 
+    const input_buffer = try allocator.alloc(u8, block_size);
+    defer allocator.free(input_buffer);
+    const output_buffer = try allocator.alloc(u8, block_size + block_size / 8 + 64);
+    defer allocator.free(output_buffer);
+
     switch (config.mode) {
         .encode => {
             switch (config.algorithm) {
@@ -157,7 +159,7 @@ pub fn main(init: std.process.Init) !void {
                     var encoder = try if (config.import) |import_file| blk: {
                         const import_size = try import_file.length(io);
                         var import = try import_file.createMemoryMap(io, .{
-                            .populate = false,
+                            .populate = true,
                             .len = import_size,
                             .protection = .{ .read = true },
                         });
@@ -166,61 +168,26 @@ pub fn main(init: std.process.Init) !void {
                     } else Encoder.init(allocator);
                     defer encoder.deinit(allocator);
 
-                    const input_size = try config.input.file.length(io);
-                    const bound = Encoder.outputBufferBound(input_size);
+                    while (true) {
+                        var input_reader = config.input.readerStreaming(io, input_buffer);
+                        const input_size = try input_reader.interface.readSliceShort(input_buffer);
+                        if (input_size == 0) break;
 
-                    var output_size: usize = undefined;
-                    if (config.input.is_std) {
-                        var reader = config.input.file.readerStreaming(io, &.{});
-                        const input_buffer = try reader.interface.allocRemaining(allocator, .unlimited);
-                        defer allocator.free(input_buffer);
+                        const output_size = encoder.compressBlockToBuffer(input_buffer[0..input_size], output_buffer);
 
-                        const output_buffer = try allocator.alloc(u8, bound);
-                        defer allocator.free(output_buffer);
-                        output_size = encoder.compressBlockToBuffer(input_buffer, output_buffer);
-                        try config.output.file.writeStreamingAll(io, output_buffer[0..output_size]);
-                    } else if (config.output.is_std) {
-                        var input = try config.input.file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = input_size,
-                            .protection = .{ .read = true },
-                        });
-                        defer input.destroy(io);
-
-                        const output_buffer = try allocator.alloc(u8, bound);
-                        defer allocator.free(output_buffer);
-                        output_size = encoder.compressBlockToBuffer(input.memory, output_buffer);
-                        try config.output.file.writeStreamingAll(io, output_buffer[0..output_size]);
-                    } else {
-                        var input = try config.input.file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = input_size,
-                            .protection = .{ .read = true },
-                        });
-                        defer input.destroy(io);
-
-                        try config.output.file.setLength(io, bound);
-                        var output = try config.output.file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = bound,
-                            .protection = .{ .read = true, .write = true },
-                        });
-                        output_size = encoder.compressBlockToBuffer(input.memory, output.memory);
-                        output.destroy(io);
-                        try config.output.file.setLength(io, output_size);
+                        var frame_len: [frame_len_bytes]u8 = undefined;
+                        std.mem.writeInt(u64, &frame_len, @intCast(output_size), .little);
+                        try config.output.writeStreamingAll(io, &frame_len);
+                        try config.output.writeStreamingAll(io, output_buffer[0..output_size]);
                     }
 
-                    if (config.@"export") |export_file| {
+                    const frame_len: [frame_len_bytes]u8 = @splat(0);
+                    try config.output.writeStreamingAll(io, &frame_len);
+
+                    if (config.@"export") |@"export"| {
                         const slice = try encoder.toSlice(allocator);
                         defer allocator.free(slice);
-                        try export_file.setLength(io, slice.len);
-                        var @"export" = try export_file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = slice.len,
-                            .protection = .{ .read = true, .write = true },
-                        });
-                        @memcpy(@"export".memory, slice);
-                        @"export".destroy(io);
+                        try @"export".writeStreamingAll(io, slice);
                     }
                 },
             }
@@ -237,7 +204,7 @@ pub fn main(init: std.process.Init) !void {
                     var decoder = try if (config.import) |import_file| blk: {
                         const import_size = try import_file.length(io);
                         var import = try import_file.createMemoryMap(io, .{
-                            .populate = false,
+                            .populate = true,
                             .len = import_size,
                             .protection = .{ .read = true },
                         });
@@ -246,60 +213,32 @@ pub fn main(init: std.process.Init) !void {
                     } else Decoder.init(allocator);
                     defer decoder.deinit(allocator);
 
-                    const input_size = try config.input.file.length(io);
-                    var output_size: usize = undefined;
-                    if (config.input.is_std) {
-                        var reader = config.input.file.readerStreaming(io, &.{});
-                        const input_buffer = try reader.interface.allocRemaining(allocator, .unlimited);
-                        defer allocator.free(input_buffer);
+                    var frame_len: [frame_len_bytes]u8 = undefined;
+                    var frame_reader = config.input.readerStreaming(io, &frame_len);
+                    while (true) {
+                        frame_reader.interface.readSliceAll(&frame_len) catch |err| switch (err) {
+                            error.EndOfStream => break,
+                            else => return err,
+                        };
+                        const compressed_len = std.mem.readInt(u64, &frame_len, .little);
+                        if (compressed_len == 0) break;
 
-                        const output_buffer = try allocator.alloc(u8, Decoder.exactOutputLength(input_buffer));
-                        defer allocator.free(output_buffer);
-                        output_size = decoder.decompressBlockToBuffer(input_buffer, output_buffer);
-                        try config.output.file.writeStreamingAll(io, output_buffer[0..output_size]);
-                    } else if (config.output.is_std) {
-                        var input = try config.input.file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = input_size,
-                            .protection = .{ .read = true },
-                        });
-                        defer input.destroy(io);
+                        var input_reader = config.input.readerStreaming(io, input_buffer);
+                        try input_reader.interface.readSliceAll(input_buffer[0..compressed_len]);
+                        const input = input_buffer[0..compressed_len];
 
-                        const output_buffer = try allocator.alloc(u8, Decoder.exactOutputLength(input.memory));
-                        defer allocator.free(output_buffer);
-                        output_size = decoder.decompressBlockToBuffer(input.memory, output_buffer);
-                        try config.output.file.writeStreamingAll(io, output_buffer[0..output_size]);
-                    } else {
-                        var input = try config.input.file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = input_size,
-                            .protection = .{ .read = true },
-                        });
-                        defer input.destroy(io);
+                        const len = Decoder.exactOutputLength(input);
+                        if (len > output_buffer.len) return error.BlockTooLarge;
+                        const consumed = decoder.decompressBlockToBuffer(input, output_buffer);
+                        if (consumed != compressed_len) return error.CorruptFrame;
 
-                        const bound = Decoder.exactOutputLength(input.memory);
-                        try config.output.file.setLength(io, bound);
-                        var output = try config.output.file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = bound,
-                            .protection = .{ .read = true, .write = true },
-                        });
-                        output_size = decoder.decompressBlockToBuffer(input.memory, output.memory);
-                        output.destroy(io);
-                        try config.output.file.setLength(io, output_size);
+                        try config.output.writeStreamingAll(io, output_buffer[0..len]);
                     }
 
-                    if (config.@"export") |export_file| {
+                    if (config.@"export") |@"export"| {
                         const slice = try decoder.toSlice(allocator);
                         defer allocator.free(slice);
-                        try export_file.setLength(io, slice.len);
-                        var @"export" = try export_file.createMemoryMap(io, .{
-                            .populate = false,
-                            .len = slice.len,
-                            .protection = .{ .read = true, .write = true },
-                        });
-                        @memcpy(@"export".memory, slice);
-                        @"export".destroy(io);
+                        try @"export".writeStreamingAll(io, slice);
                     }
                 },
             }
