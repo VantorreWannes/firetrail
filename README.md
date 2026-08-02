@@ -34,7 +34,7 @@ Firetrail comes in three flavors, all built around the same idea: hash 8-byte wo
 ### CLI Tool
 
 ```bash
-firetrail {white|orange|red} [--encode | --decode] <input> <output> [--import <lut_file>] [--export <lut_file>]
+firetrail {white|orange|red} [encode | decode] <input> <output> [--import <lut_file>] [--export <lut_file>]
 ```
 
 The argument `<input>` or `<output>` can be replaced with `-` to stream from `stdin` or to `stdout` respectively.
