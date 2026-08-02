@@ -83,80 +83,103 @@ pub fn WarmDecoderBenchmark(Decoder: type) type {
     };
 }
 
-fn addBenchmarks(
+fn addEncoderBenchmarks(
     bench: *zbench.Benchmark,
-    arena: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     comptime label: []const u8,
     comptime Encoder: type,
+    file_path: []const u8,
+    input_data: []const u8,
+    lut: []u8,
+) !void {
+    const basename = std.fs.path.basename(file_path);
+
+    const output_buffer_bound = Encoder.outputBufferBound(input_data.len);
+    const output_data_buffer = try allocator.alloc(u8, output_buffer_bound);
+    defer allocator.free(output_data_buffer);
+
+    const cold_encoder = try allocator.create(Encoder);
+    cold_encoder.* = try Encoder.init(allocator);
+    const cold_encoder_name = try std.fmt.allocPrint(allocator, label ++ "Encoder (cold): {s}", .{basename});
+    const cold_encoder_param = try allocator.create(ColdEncoderBenchmark(Encoder));
+    cold_encoder_param.* = ColdEncoderBenchmark(Encoder).init(cold_encoder, input_data, output_data_buffer);
+    try bench.addParam(cold_encoder_name, @as(*const ColdEncoderBenchmark(Encoder), cold_encoder_param), .{});
+
+    const warm_encoder = try allocator.create(Encoder);
+    warm_encoder.* = try Encoder.fromSlice(allocator, lut);
+    const warm_encoder_name = try std.fmt.allocPrint(allocator, label ++ "Encoder (warm): {s}", .{basename});
+    const warm_encoder_param = try allocator.create(WarmEncoderBenchmark(Encoder));
+    warm_encoder_param.* = WarmEncoderBenchmark(Encoder).init(warm_encoder, input_data, output_data_buffer);
+    try bench.addParam(warm_encoder_name, @as(*const WarmEncoderBenchmark(Encoder), warm_encoder_param), .{});
+}
+
+fn addDecoderBenchmarks(
+    bench: *zbench.Benchmark,
+    allocator: std.mem.Allocator,
+    comptime label: []const u8,
     comptime Decoder: type,
     file_path: []const u8,
     input_data: []const u8,
-    dictionary: []const u8,
+    output_data_length: usize,
+    lut: []u8,
 ) !void {
     const basename = std.fs.path.basename(file_path);
-    const buf = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
-    const decompressed_data = try arena.alloc(u8, input_data.len);
 
-    const cold_encoder = try arena.create(Encoder);
-    cold_encoder.* = try Encoder.init(arena);
-    const cold_enc_name = try std.fmt.allocPrint(arena, label ++ " Encoder (cold): {s}", .{basename});
-    const cold_enc_param = try arena.create(ColdEncoderBenchmark(Encoder));
-    cold_enc_param.* = ColdEncoderBenchmark(Encoder).init(cold_encoder, input_data, buf);
-    try bench.addParam(cold_enc_name, @as(*const ColdEncoderBenchmark(Encoder), cold_enc_param), .{});
+    const output_buffer_bound = output_data_length;
+    const output_data_buffer = try allocator.alloc(u8, output_buffer_bound);
+    defer allocator.free(output_data_buffer);
 
-    var dict_reader = std.Io.Reader.fixed(dictionary);
-    const warm_encoder = try arena.create(Encoder);
-    warm_encoder.* = try Encoder.fromSlice(arena, &dict_reader);
-    const compressed_size = warm_encoder.compressBlockToBuffer(input_data, buf);
-    const compressed_data = try arena.dupe(u8, buf[0..compressed_size]);
+    const cold_encoder = try allocator.create(Decoder);
+    cold_encoder.* = try Decoder.init(allocator);
+    const cold_decoder_name = try std.fmt.allocPrint(allocator, label ++ "Decoder (cold): {s}", .{basename});
+    const cold_decoder_param = try allocator.create(ColdDecoderBenchmark(Decoder));
+    cold_decoder_param.* = ColdDecoderBenchmark(Decoder).init(cold_encoder, input_data, output_data_buffer);
+    try bench.addParam(cold_decoder_name, @as(*const ColdDecoderBenchmark(Decoder), cold_decoder_param), .{});
 
-    const warm_enc_name = try std.fmt.allocPrint(arena, label ++ " Encoder (warm): {s}", .{basename});
-    const warm_enc_param = try arena.create(WarmEncoderBenchmark(Encoder));
-    warm_enc_param.* = WarmEncoderBenchmark(Encoder).init(warm_encoder, input_data, buf);
-    try bench.addParam(warm_enc_name, @as(*const WarmEncoderBenchmark(Encoder), warm_enc_param), .{});
-
-    const cold_decoder = try arena.create(Decoder);
-    cold_decoder.* = try Decoder.init(arena);
-    const cold_dec_name = try std.fmt.allocPrint(arena, label ++ " Decoder (cold): {s}", .{basename});
-    const cold_dec_param = try arena.create(ColdDecoderBenchmark(Decoder));
-    cold_dec_param.* = ColdDecoderBenchmark(Decoder).init(cold_decoder, compressed_data, decompressed_data);
-    try bench.addParam(cold_dec_name, @as(*const ColdDecoderBenchmark(Decoder), cold_dec_param), .{});
-
-    var dict_reader2 = std.Io.Reader.fixed(dictionary);
-    const warm_decoder = try arena.create(Decoder);
-    warm_decoder.* = try Decoder.fromSlice(arena, &dict_reader2);
-    _ = warm_decoder.decompressBlockToBuffer(compressed_data, decompressed_data);
-
-    const warm_dec_name = try std.fmt.allocPrint(arena, label ++ " Decoder (warm): {s}", .{basename});
-    const warm_dec_param = try arena.create(WarmDecoderBenchmark(Decoder));
-    warm_dec_param.* = WarmDecoderBenchmark(Decoder).init(warm_decoder, compressed_data, decompressed_data);
-    try bench.addParam(warm_dec_name, @as(*const WarmDecoderBenchmark(Decoder), warm_dec_param), .{});
+    const warm_encoder = try allocator.create(Decoder);
+    warm_encoder.* = try Decoder.fromSlice(allocator, lut);
+    const warm_decoder_name = try std.fmt.allocPrint(allocator, label ++ "Decoder (warm): {s}", .{basename});
+    const warm_decoder_param = try allocator.create(WarmDecoderBenchmark(Decoder));
+    warm_decoder_param.* = WarmDecoderBenchmark(Decoder).init(warm_encoder, input_data, output_data_buffer);
+    try bench.addParam(warm_decoder_name, @as(*const WarmDecoderBenchmark(Decoder), warm_decoder_param), .{});
 }
 
-fn trainDictionary(arena: std.mem.Allocator, input_data: []const u8) ![]u8 {
-    const Encoder = firetrail.red.Encoder;
+fn trainDictionary(comptime Encoder: type, allocator: std.mem.Allocator, input_data: []const u8) ![]u8 {
+    var encoder = try Encoder.init(allocator);
 
-    var encoder = try Encoder.init(arena);
+    const buffer = try allocator.alloc(u8, Encoder.outputBufferBound(input_data.len));
+    _ = encoder.compressBlockToBuffer(input_data, buffer);
 
-    const buf = try arena.alloc(u8, Encoder.outputBufferBound(input_data.len));
-    _ = encoder.compressBlockToBuffer(input_data, buf);
+    return try encoder.toSlice(allocator);
+}
 
-    var dict_writer = std.Io.Writer.Allocating.init(arena);
-    try encoder.toSlice(&dict_writer.writer);
-    return dict_writer.toOwnedSlice();
+fn encode(
+    allocator: std.mem.Allocator,
+    comptime Encoder: type,
+    input_data: []const u8,
+) ![]u8 {
+    var encoder = try Encoder.init(allocator);
+    defer encoder.deinit(allocator);
+
+    const output_buffer_bound = Encoder.outputBufferBound(input_data.len);
+    const output_data_buffer = try allocator.alloc(u8, output_buffer_bound);
+    defer allocator.free(output_data_buffer);
+
+    const output_size = encoder.compressBlockToBuffer(input_data, output_data_buffer);
+    return try allocator.dupe(u8, output_data_buffer[0..output_size]);
 }
 
 pub fn main(init: std.process.Init) !void {
-    const arena = init.arena.allocator();
+    const allocator = init.arena.allocator();
     const io = init.io;
 
-    const args = try init.minimal.args.toSlice(arena);
+    const args = try init.minimal.args.toSlice(allocator);
 
     var stdout_buffer: [4096]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const writer = &stdout_file_writer.interface;
 
-    var bench = zbench.Benchmark.init(arena, .{});
+    var bench = zbench.Benchmark.init(allocator, .{});
     defer bench.deinit();
 
     if (args.len > 1) {
@@ -164,15 +187,28 @@ pub fn main(init: std.process.Init) !void {
         try writer.print("Loading {s}...\n", .{file_path});
         try writer.flush();
 
-        const input_data = try readFile(arena, io, file_path);
+        const input_data = try readFile(allocator, io, file_path);
 
-        try writer.print("Training dictionary...\n", .{});
-        try writer.flush();
-        const dictionary = try trainDictionary(arena, input_data);
+        {
+            const lut = try trainDictionary(firetrail.red.Encoder, allocator, input_data);
+            try addEncoderBenchmarks(&bench, allocator, "White", firetrail.white.Encoder, file_path, input_data, lut);
+            const encoded = try encode(allocator, firetrail.white.Encoder, input_data);
+            try addDecoderBenchmarks(&bench, allocator, "White", firetrail.white.Decoder, file_path, encoded, input_data.len, lut);
+        }
 
-        try addBenchmarks(&bench, arena, "White", firetrail.white.Encoder, firetrail.white.Decoder, file_path, input_data, dictionary);
-        try addBenchmarks(&bench, arena, "Red", firetrail.red.Encoder, firetrail.red.Decoder, file_path, input_data, dictionary);
-        try addBenchmarks(&bench, arena, "Orange", firetrail.orange.Encoder, firetrail.orange.Decoder, file_path, input_data, dictionary);
+        {
+            const lut = try trainDictionary(firetrail.orange.Encoder, allocator, input_data);
+            try addEncoderBenchmarks(&bench, allocator, "Orange", firetrail.orange.Encoder, file_path, input_data, lut);
+            const encoded = try encode(allocator, firetrail.white.Encoder, input_data);
+            try addDecoderBenchmarks(&bench, allocator, "Orange", firetrail.orange.Decoder, file_path, encoded, input_data.len, lut);
+        }
+
+        {
+            const lut = try trainDictionary(firetrail.red.Encoder, allocator, input_data);
+            try addEncoderBenchmarks(&bench, allocator, "Red", firetrail.red.Encoder, file_path, input_data, lut);
+            const encoded = try encode(allocator, firetrail.white.Encoder, input_data);
+            try addDecoderBenchmarks(&bench, allocator, "Red", firetrail.red.Decoder, file_path, encoded, input_data.len, lut);
+        }
     }
 
     try writer.writeAll("\n");
