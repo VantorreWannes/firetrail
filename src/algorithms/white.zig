@@ -7,13 +7,6 @@ pub const Encoder = WhiteEncoder(u64, u8, u16, u16);
 /// The default white decoder instantiation (64-bit words, 8-bit headers, 16-bit hashes and cache).
 pub const Decoder = WhiteDecoder(u64, u8, u16, u16);
 
-/// A dictionary encoder that replaces repeated words with their hashes.
-///
-/// The white variant uses a static dictionary: the table is never updated during
-/// compression, so it must be trained beforehand (via `toSlice`/`fromSlice`).
-///
-/// Input is processed in batches of `@bitSizeOf(Header)` words; each batch is
-/// preceded by a header whose bits mark which words were replaced by hashes.
 pub fn WhiteEncoder(comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     const Hasher = hashers.NumberHasher(Word, Hash, 0);
     const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
@@ -29,38 +22,31 @@ pub fn WhiteEncoder(comptime Word: type, comptime Header: type, comptime Hash: t
 
         table: Table,
 
-        /// Creates an encoder with an empty (zeroed) dictionary.
         pub fn init(allocator: std.mem.Allocator) !Self {
             var self = Self{ .table = try Table.init(allocator) };
             self.reset();
             return self;
         }
 
-        /// Creates an encoder with a dictionary previously written with `toSlice`.
         pub fn fromSlice(allocator: std.mem.Allocator, slice: []u8) !Self {
             const table = try Table.fromSlice(allocator, slice);
             return Self{ .table = table };
         }
 
-        /// Writes the dictionary to `writer`, suitable for `fromSlice`.
         pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
             return try self.table.toSlice(allocator);
         }
 
-        /// Frees the dictionary storage.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.table.deinit(allocator);
             self.* = undefined;
         }
 
-        /// Returns the maximum number of bytes `compressBlockToBuffer` can write for `len` input bytes.
         pub fn outputBufferBound(len: usize) usize {
             const blocks = len / batch_bytes;
             return len + (blocks * header_bytes) + header_bytes + word_bytes;
         }
 
-        /// Compresses `input` into `output`, which must be at least `outputBufferBound(input.len)`
-        /// bytes long. Returns the number of bytes written.
         pub fn compressBlockToBuffer(self: *Self, noalias input: []const u8, noalias output: []u8) usize {
             @setRuntimeSafety(false);
 
@@ -100,23 +86,16 @@ pub fn WhiteEncoder(comptime Word: type, comptime Header: type, comptime Hash: t
             return output_index;
         }
 
-        /// Clears the dictionary back to its initial zeroed state.
         pub fn reset(self: *Self) void {
             self.table.fill(0);
         }
     };
 }
 
-/// A dictionary decoder that reconstructs words from their hashes.
-///
-/// The white variant mirrors `WhiteEncoder`: it uses a static dictionary that must
-/// match the one used during compression.
 pub fn WhiteDecoder(comptime Word: type, comptime Header: type, comptime Hash: type, comptime Cache: type) type {
     return struct {
         const Self = @This();
-        /// The hasher used to derive dictionary keys from words.
         pub const Hasher = hashers.NumberHasher(Word, Hash, 0);
-        /// The dictionary table type.
         pub const Table = luts.ArrayLookupTable(Hash, Word, std.math.maxInt(Cache) + 1);
 
         const header_bits = @bitSizeOf(Header);
@@ -127,25 +106,21 @@ pub fn WhiteDecoder(comptime Word: type, comptime Header: type, comptime Hash: t
 
         table: Table,
 
-        /// Creates a decoder with an empty (zeroed) dictionary.
         pub fn init(allocator: std.mem.Allocator) !Self {
             var self = Self{ .table = try Table.init(allocator) };
             self.reset();
             return self;
         }
 
-        /// Creates an encoder with a dictionary previously written with `toSlice`.
         pub fn fromSlice(allocator: std.mem.Allocator, slice: []u8) !Self {
             const table = try Table.fromSlice(allocator, slice);
             return Self{ .table = table };
         }
 
-        /// Writes the dictionary to `writer`, suitable for `fromSlice`.
         pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
             return try self.table.toSlice(allocator);
         }
 
-        /// Frees the dictionary storage.
         pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
             self.table.deinit(allocator);
             self.* = undefined;
@@ -156,8 +131,6 @@ pub fn WhiteDecoder(comptime Word: type, comptime Header: type, comptime Hash: t
             return len + (blocks * header_bytes) + header_bytes + word_bytes;
         }
 
-        /// Decompresses a block produced by `compressBlockToBuffer` into `output`, which must
-        /// be at least `exactOutputLength(input)` bytes long. Returns the number of input bytes consumed.
         pub fn decompressBlockToBuffer(self: *Self, noalias input: []const u8, noalias output: []u8) usize {
             @setRuntimeSafety(false);
 
