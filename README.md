@@ -12,18 +12,22 @@ Firetrail comes in three flavors, all built around the same idea: hash 8-byte wo
 - **Orange** updates its table on every miss (last-write-wins). Adapts to any data, no dictionary needed.
 - **Red** updates its table only when a slot's frequency count decays to zero. Slower, but the best dictionary trainer.
 
-### On `silesia.tar` (mixed corpus, zbench, warm)
+## [HDFS.log](https://www.kaggle.com/datasets/ayenuryrr/loghub-hdfs-hadoop-distributed-file-system-data)
 
-|                      | Encode     | Decode     | Ratio        |
-| -------------------- | ---------- | ---------- | ------------ |
-| White (trained dict) | ~4.67 GB/s | ~7.55 GB/s | ~23.4% saved |
-| Orange               | ~3.17 GB/s | ~5.37 GB/s | ~35.2% saved |
-| Red                  | ~1.57 GB/s | ~1.95 GB/s | ~34.4% saved |
+1,577,982,906 bytes, single-thread, in-memory
 
-### lz4 (for reference)
-
-- **Speed:** ~0.89 GB/s encoding | ~5.76 GB/s decoding
-- **Ratio:** High | ~52.4% saved on `silesia.tar`.
+| Codec                | Config                  | Encode (GB/s) | Decode (GB/s) |     Ratio |
+| -------------------- | ----------------------- | ------------: | ------------: | --------: |
+| **firetrail White**  | warm (red-trained dict) |          6.57 |      **9.64** |     2.19× |
+| **firetrail Orange** | cold                    |          4.95 |          7.99 |         — |
+| **firetrail Orange** | warm                    |          4.95 |          7.96 | **2.53×** |
+| **firetrail Red**    | cold                    |          2.66 |          3.43 |         — |
+| **firetrail Red**    | warm                    |          2.66 |          3.45 |     2.43× |
+| density Chameleon    | raw                     |          4.07 |          4.18 |     1.86× |
+| density Cheetah      | raw                     |          1.60 |          1.36 |     4.97× |
+| density Lion         | raw                     |          1.03 |          1.17 |     5.61× |
+| LZ4                  | default                 |          1.43 |          5.05 |     5.69× |
+| Snappy               | stream                  |          1.41 |          2.29 |     5.50× |
 
 ## Benchmark plot
 
