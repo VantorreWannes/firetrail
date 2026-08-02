@@ -157,16 +157,14 @@ fn encode(
     allocator: std.mem.Allocator,
     comptime Encoder: type,
     input_data: []const u8,
+    lut: []u8,
 ) ![]u8 {
-    var encoder = try Encoder.init(allocator);
+    var encoder = try Encoder.fromSlice(allocator, lut);
     defer encoder.deinit(allocator);
-
-    const output_buffer_bound = Encoder.outputBufferBound(input_data.len);
-    const output_data_buffer = try allocator.alloc(u8, output_buffer_bound);
-    defer allocator.free(output_data_buffer);
-
-    const output_size = encoder.compressBlockToBuffer(input_data, output_data_buffer);
-    return try allocator.dupe(u8, output_data_buffer[0..output_size]);
+    const buf = try allocator.alloc(u8, Encoder.outputBufferBound(input_data.len));
+    defer allocator.free(buf);
+    const n = encoder.compressBlockToBuffer(input_data, buf);
+    return try allocator.dupe(u8, buf[0..n]);
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -192,21 +190,21 @@ pub fn main(init: std.process.Init) !void {
         {
             const lut = try trainDictionary(firetrail.red.Encoder, allocator, input_data);
             try addEncoderBenchmarks(&bench, allocator, "White", firetrail.white.Encoder, file_path, input_data, lut);
-            const encoded = try encode(allocator, firetrail.white.Encoder, input_data);
+            const encoded = try encode(allocator, firetrail.white.Encoder, input_data, lut);
             try addDecoderBenchmarks(&bench, allocator, "White", firetrail.white.Decoder, file_path, encoded, input_data.len, lut);
         }
 
         {
             const lut = try trainDictionary(firetrail.orange.Encoder, allocator, input_data);
             try addEncoderBenchmarks(&bench, allocator, "Orange", firetrail.orange.Encoder, file_path, input_data, lut);
-            const encoded = try encode(allocator, firetrail.white.Encoder, input_data);
+            const encoded = try encode(allocator, firetrail.orange.Encoder, input_data, lut);
             try addDecoderBenchmarks(&bench, allocator, "Orange", firetrail.orange.Decoder, file_path, encoded, input_data.len, lut);
         }
 
         {
             const lut = try trainDictionary(firetrail.red.Encoder, allocator, input_data);
             try addEncoderBenchmarks(&bench, allocator, "Red", firetrail.red.Encoder, file_path, input_data, lut);
-            const encoded = try encode(allocator, firetrail.white.Encoder, input_data);
+            const encoded = try encode(allocator, firetrail.red.Encoder, input_data, lut);
             try addDecoderBenchmarks(&bench, allocator, "Red", firetrail.red.Decoder, file_path, encoded, input_data.len, lut);
         }
     }
