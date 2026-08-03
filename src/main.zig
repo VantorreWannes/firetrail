@@ -229,8 +229,11 @@ pub fn main(init: std.process.Init) !void {
                         if (output_size == 0) break;
 
                         try input_data_reader.interface.readSliceAll(input_data_buffer[0..output_size]);
-                        _ = decoder.decompressBlockToBuffer(input_data_buffer[0..input_size], output_data_buffer[0..output_size]);
-                        try output_data_writer.interface.writeAll(output_data_buffer[0..output_size]);
+                        _ = decoder.decompressBlockToBuffer(
+                            input_data_buffer[0..output_size],
+                            output_data_buffer[0..input_size],
+                        );
+                        try output_data_writer.interface.writeAll(output_data_buffer[0..input_size]);
                     }
 
                     if (config.@"export") |@"export"| {
