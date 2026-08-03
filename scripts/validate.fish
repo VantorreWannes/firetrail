@@ -35,5 +35,7 @@ function validate -a file
     cmp $target "$target.bak"
 end
 
-validate enwik9 | tee data/validate-enwik9.log
 validate silesia.tar | tee data/validate-silesia.log
+validate enwik8 | tee data/validate-enwik8.log
+validate enwik9 | tee data/validate-enwik9.log
+validate HDFS.log | tee data/validate-HDFS.log

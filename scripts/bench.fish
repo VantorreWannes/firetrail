@@ -16,6 +16,8 @@ function bench -a file
 
     cp $source $target
 
+    du -ba "$target"
+
     firetrail red encode "$target" "$target.ftr" --export "$target.ftr.lut"
     du -ba "$target.ftr.lut"
 
@@ -44,5 +46,7 @@ function bench -a file
     du -ba "$target.lz4"
 end
 
-bench enwik9 | tee data/bench-enwik9.log
 bench silesia.tar | tee data/bench-silesia.log
+bench enwik8 | tee data/bench-enwik8.log
+bench enwik9 | tee data/bench-enwik9.log
+bench HDFS.log | tee data/bench-HDFS.log
