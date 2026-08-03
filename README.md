@@ -77,7 +77,7 @@ Firetrail comes in three flavors, all built around the same idea: hash 8-byte wo
 ### CLI Tool
 
 ```bash
-firetrail {white|orange|red} [encode | decode] <input> <output> [--import <lut_file>] [--export <lut_file>]
+firetrail {white|orange|red} {encode | decode} <input> <output> [--import <lut_file>] [--export <lut_file>]
 ```
 
 The argument `<input>` or `<output>` can be replaced with `-` to stream from `stdin` or to `stdout` respectively.
@@ -86,11 +86,11 @@ The argument `<input>` or `<output>` can be replaced with `-` to stream from `st
 
 ```bash
 # Train once (red makes the best dictionaries)
-firetrail red --encode sample.log /dev/null --export dict.bin
+firetrail red encode sample.log /dev/null --export dict.bin
 
 # Deploy everywhere
-firetrail white --encode app.log app.log.ftw --import dict.bin
-firetrail white --decode app.log.ftw app.log --import dict.bin
+firetrail white encode app.log app.log.ftw --import dict.bin
+firetrail white decode app.log.ftw app.log --import dict.bin
 ```
 
 ### Benchmarks
