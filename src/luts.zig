@@ -177,7 +177,7 @@ pub fn FreqLookupTable(
 
         /// Writes the raw values to a slice, suitable for `fromSlice`. Counters are not persisted.
         pub fn toSlice(self: *const Self, allocator: std.mem.Allocator) ![]u8 {
-            const values = try allocator.dupe(u64, self.values);
+            const values = try allocator.dupe(Value, self.values);
             return std.mem.sliceAsBytes(values);
         }
 
