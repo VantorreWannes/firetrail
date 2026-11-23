@@ -37,10 +37,11 @@ pub fn build(b: *std.Build) void {
     // Libraries
     const root_lib = b.addLibrary(.{
         .name = "firetrail",
-        .linkage = .dynamic,
+        .linkage = .static,
         .root_module = root_mod,
         .use_llvm = true,
     });
+    root_lib.installHeader(b.path("include/firetrail.h"), "firetrail.h");
 
     // Directories
     const docs_dir = b.addInstallDirectory(.{

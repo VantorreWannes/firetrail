@@ -1,6 +1,7 @@
 const std = @import("std");
 const luts = @import("luts.zig");
 const hashers = @import("hashers.zig");
+pub const abi = @import("c.zig");
 /// White algorithm: static-dictionary dictionary coder.
 pub const white = @import("algorithms/white.zig");
 /// Orange algorithm: adaptive dictionary coder.
@@ -14,4 +15,8 @@ test {
     std.testing.refAllDecls(white);
     std.testing.refAllDecls(orange);
     std.testing.refAllDecls(red);
+}
+
+comptime {
+    _ = std.testing.refAllDecls(abi);
 }
