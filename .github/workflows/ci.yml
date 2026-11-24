@@ -12,12 +12,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest]
-        zig: ["0.16.0", "master"]
-        include:
-          - zig: "master"
-            experimental: true
+        zig: ["0.16.0"]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.experimental == true }}
 
     steps:
       - uses: actions/checkout@v4
