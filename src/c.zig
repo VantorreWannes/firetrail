@@ -220,3 +220,50 @@ export fn firetrail_decoder_decompress(
     };
     return output_size;
 }
+
+test "C ABI round-trip for white, orange, and red" {
+    const testing = std.testing;
+    const input =
+        \\firetrail compression round-trip test payload!
+        \\firetrail compression round-trip test payload!
+        \\firetrail compression round-trip test payload!
+        \\firetrail compression round-trip test payload!
+    ;
+
+    const compressed = try testing.allocator.alloc(u8, firetrail_max_compressed_size(input.len));
+    defer testing.allocator.free(compressed);
+    const decompressed = try testing.allocator.alloc(u8, input.len);
+    defer testing.allocator.free(decompressed);
+
+    const table = try testing.allocator.alloc(u8, firetrail_table_size());
+    defer testing.allocator.free(table);
+    try testing.expectEqual(table.len, firetrail_train_table(input.ptr, input.len, table.ptr, table.len));
+
+    for ([_]Algorithm{ .white, .orange, .red }) |algorithm| {
+        const raw_algorithm: c_int = switch (algorithm) {
+            .white => -1,
+            .orange => 0,
+            .red => 1,
+        };
+        const encoder = firetrail_encoder_create(raw_algorithm) orelse return error.TestUnexpectedResult;
+        defer firetrail_encoder_destroy(encoder);
+        const decoder = firetrail_decoder_create(raw_algorithm) orelse return error.TestUnexpectedResult;
+        defer firetrail_decoder_destroy(decoder);
+
+        if (algorithm == .white) {
+            try testing.expect(firetrail_encoder_import_table(encoder, table.ptr, table.len));
+            try testing.expect(firetrail_decoder_import_table(decoder, table.ptr, table.len));
+        }
+
+        const compressed_size = firetrail_encoder_compress(encoder, input.ptr, input.len, compressed.ptr, compressed.len);
+        try testing.expect(compressed_size > 0);
+
+        @memset(decompressed, 0);
+        const decompressed_size = firetrail_decoder_decompress(decoder, compressed.ptr, compressed_size, decompressed.ptr, decompressed.len);
+        try testing.expectEqual(input.len, decompressed_size);
+        try testing.expectEqualStrings(input, decompressed);
+    }
+
+    try testing.expect(firetrail_encoder_create(2) == null);
+    try testing.expect(firetrail_decoder_create(2) == null);
+}

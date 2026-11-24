@@ -22,8 +22,9 @@ const Parameters = struct {
     }
 
     pub fn init(allocator: std.mem.Allocator, args: std.process.Args) !Self {
-        const arguments = try args.toSlice(allocator);
-        defer allocator.free(arguments);
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+        const arguments = try args.toSlice(arena.allocator());
 
         const name_index: ?usize = if (arguments.len > 0) 0 else null;
         const algorithm_index: ?usize = if (arguments.len > 1) 1 else null;
