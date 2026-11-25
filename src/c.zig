@@ -240,14 +240,9 @@ test "C ABI round-trip for white, orange, and red" {
     try testing.expectEqual(table.len, firetrail_train_table(input.ptr, input.len, table.ptr, table.len));
 
     for ([_]Algorithm{ .white, .orange, .red }) |algorithm| {
-        const raw_algorithm: c_int = switch (algorithm) {
-            .white => -1,
-            .orange => 0,
-            .red => 1,
-        };
-        const encoder = firetrail_encoder_create(raw_algorithm) orelse return error.TestUnexpectedResult;
+        const encoder = firetrail_encoder_create(@backingInt(algorithm)) orelse return error.TestUnexpectedResult;
         defer firetrail_encoder_destroy(encoder);
-        const decoder = firetrail_decoder_create(raw_algorithm) orelse return error.TestUnexpectedResult;
+        const decoder = firetrail_decoder_create(@backingInt(algorithm)) orelse return error.TestUnexpectedResult;
         defer firetrail_decoder_destroy(decoder);
 
         if (algorithm == .white) {

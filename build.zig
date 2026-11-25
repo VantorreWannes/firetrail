@@ -81,11 +81,6 @@ pub fn build(b: *std.Build) void {
     const test_root_cmd = b.addRunArtifact(root_test_bin);
     const test_main_cmd = b.addRunArtifact(main_test_bin);
 
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-        bench_cmd.addArgs(args);
-    }
-
     run_cmd.step.dependOn(b.getInstallStep());
 
     // Steps - Run
